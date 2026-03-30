@@ -8,7 +8,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { Response } from 'express';
+import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { EnrollmentsService } from './enrollments.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';

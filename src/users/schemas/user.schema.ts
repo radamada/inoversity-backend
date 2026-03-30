@@ -20,6 +20,9 @@ export class User {
   @Prop({ default: '' })
   avatar: string;
 
+  @Prop({ default: '' })
+  bio: string;
+
   @Prop({ default: false })
   emailVerified: boolean;
 
