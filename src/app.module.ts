@@ -18,6 +18,7 @@ import { ContactModule } from './contact/contact.module';
 import { StatsModule } from './stats/stats.module';
 import { InstructorModule } from './instructor/instructor.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { WishlistModule } from './wishlist/wishlist.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     StatsModule,
     InstructorModule,
     NotificationsModule,
+    WishlistModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
