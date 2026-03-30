@@ -132,9 +132,9 @@ export class CoursesService {
     course.published = !course.published;
     const saved = await course.save();
 
-    // Dacă tocmai a fost scos din publicare, curăță toate wishlist-urile
+    // Dacă tocmai a fost scos din publicare, notifică și curăță wishlist-urile
     if (!saved.published) {
-      await this.wishlistModel.deleteMany({ courseId: saved._id });
+      await this.cleanWishlistAndNotify(saved._id.toString(), saved.title);
     }
 
     return saved;
@@ -142,10 +142,28 @@ export class CoursesService {
 
   async delete(id: string): Promise<void> {
     const course = await this.findById(id);
+    await this.cleanWishlistAndNotify(course._id.toString(), course.title);
     await this.sectionModel.deleteMany({ courseId: course._id });
     await this.lessonModel.deleteMany({ courseId: course._id });
-    await this.wishlistModel.deleteMany({ courseId: course._id });
     await course.deleteOne();
+  }
+
+  private async cleanWishlistAndNotify(courseId: string, courseTitle: string): Promise<void> {
+    const entries = await this.wishlistModel
+      .find({ courseId: new Types.ObjectId(courseId) })
+      .select('userId')
+      .lean();
+
+    if (entries.length) {
+      await this.notificationsService.notifyUsersBatch(
+        entries.map((e) => e.userId),
+        'wishlist_removed',
+        'Curs indisponibil',
+        `Cursul „${courseTitle}" pe care l-ai salvat nu mai este disponibil.`,
+        courseId,
+      );
+      await this.wishlistModel.deleteMany({ courseId: new Types.ObjectId(courseId) });
+    }
   }
 
   // ── Sections ─────────────────────────────────────────────────────────────

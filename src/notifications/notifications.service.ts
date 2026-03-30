@@ -52,6 +52,25 @@ export class NotificationsService {
     );
   }
 
+  async notifyUsersBatch(
+    userIds: Types.ObjectId[],
+    type: NotificationType,
+    title: string,
+    message: string,
+    courseId?: string,
+  ): Promise<void> {
+    if (!userIds.length) return;
+    await this.notificationModel.insertMany(
+      userIds.map((userId) => ({
+        userId,
+        type,
+        title,
+        message,
+        courseId: courseId ? new Types.ObjectId(courseId) : null,
+      })),
+    );
+  }
+
   async getForUser(userId: string, limit = 20) {
     const [notifications, unreadCount] = await Promise.all([
       this.notificationModel
