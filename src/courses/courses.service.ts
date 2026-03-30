@@ -9,6 +9,7 @@ import slugify from 'slugify';
 import { Course, CourseDocument } from './schemas/course.schema';
 import { Section, SectionDocument } from './schemas/section.schema';
 import { Lesson, LessonDocument } from './schemas/lesson.schema';
+import { Wishlist, WishlistDocument } from '../wishlist/schemas/wishlist.schema';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { CourseQueryDto } from './dto/course-query.dto';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -19,6 +20,7 @@ export class CoursesService {
     @InjectModel(Course.name) private courseModel: Model<CourseDocument>,
     @InjectModel(Section.name) private sectionModel: Model<SectionDocument>,
     @InjectModel(Lesson.name) private lessonModel: Model<LessonDocument>,
+    @InjectModel(Wishlist.name) private wishlistModel: Model<WishlistDocument>,
     private notificationsService: NotificationsService,
   ) {}
 
@@ -128,13 +130,21 @@ export class CoursesService {
   async togglePublish(id: string): Promise<CourseDocument> {
     const course = await this.findById(id);
     course.published = !course.published;
-    return course.save();
+    const saved = await course.save();
+
+    // Dacă tocmai a fost scos din publicare, curăță toate wishlist-urile
+    if (!saved.published) {
+      await this.wishlistModel.deleteMany({ courseId: saved._id });
+    }
+
+    return saved;
   }
 
   async delete(id: string): Promise<void> {
     const course = await this.findById(id);
     await this.sectionModel.deleteMany({ courseId: course._id });
     await this.lessonModel.deleteMany({ courseId: course._id });
+    await this.wishlistModel.deleteMany({ courseId: course._id });
     await course.deleteOne();
   }
 
