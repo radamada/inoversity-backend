@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Response } from 'express';
+import { Error as MongooseError } from 'mongoose';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -15,6 +16,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
+
+    // Mongoose CastError (invalid ObjectId) → 400
+    if (exception instanceof MongooseError.CastError) {
+      return response.status(HttpStatus.BAD_REQUEST).json({
+        statusCode: HttpStatus.BAD_REQUEST,
+        timestamp: new Date().toISOString(),
+        message: 'ID invalid',
+      });
+    }
 
     const status =
       exception instanceof HttpException
