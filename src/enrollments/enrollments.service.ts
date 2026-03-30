@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import * as PDFDocument from 'pdfkit';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Enrollment, EnrollmentDocument } from './schemas/enrollment.schema';
@@ -123,6 +124,69 @@ export class EnrollmentsService {
     }
 
     return enrollment.save();
+  }
+
+  async generateCertificate(userId: string, courseId: string): Promise<Buffer> {
+    const enrollment = await this.enrollmentModel
+      .findOne({ userId: new Types.ObjectId(userId), courseId: new Types.ObjectId(courseId), status: 'active' })
+      .populate<{ courseId: { title: string } }>('courseId', 'title')
+      .populate<{ userId: { name: string } }>('userId', 'name')
+      .exec();
+
+    if (!enrollment) throw new NotFoundException('Nu ești înscris la acest curs');
+    if (!enrollment.completedAt) throw new BadRequestException('Cursul nu a fost finalizat încă');
+
+    const studentName = (enrollment.userId as any).name as string;
+    const courseTitle = (enrollment.courseId as any).title as string;
+    const completedDate = enrollment.completedAt.toLocaleDateString('ro-RO', {
+      day: 'numeric', month: 'long', year: 'numeric',
+    });
+
+    return new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 60 });
+      const chunks: Buffer[] = [];
+      doc.on('data', (c) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      // Background
+      doc.rect(0, 0, doc.page.width, doc.page.height).fill('#f8f7ff');
+
+      // Border
+      doc.rect(20, 20, doc.page.width - 40, doc.page.height - 40)
+        .lineWidth(3).stroke('#4f46e5');
+      doc.rect(28, 28, doc.page.width - 56, doc.page.height - 56)
+        .lineWidth(1).stroke('#818cf8');
+
+      // Title
+      doc.fillColor('#4f46e5').fontSize(14).font('Helvetica')
+        .text('EduInovatrium', 0, 70, { align: 'center' });
+
+      doc.fillColor('#1e1b4b').fontSize(36).font('Helvetica-Bold')
+        .text('CERTIFICAT DE ABSOLVIRE', 0, 110, { align: 'center' });
+
+      // Divider
+      doc.moveTo(180, 165).lineTo(doc.page.width - 180, 165)
+        .lineWidth(1).stroke('#c7d2fe');
+
+      // Body
+      doc.fillColor('#6b7280').fontSize(14).font('Helvetica')
+        .text('Aceasta certifică faptul că', 0, 185, { align: 'center' });
+
+      doc.fillColor('#111827').fontSize(28).font('Helvetica-Bold')
+        .text(studentName, 0, 215, { align: 'center' });
+
+      doc.fillColor('#6b7280').fontSize(14).font('Helvetica')
+        .text('a finalizat cu succes cursul', 0, 260, { align: 'center' });
+
+      doc.fillColor('#4f46e5').fontSize(20).font('Helvetica-Bold')
+        .text(`"${courseTitle}"`, 0, 288, { align: 'center' });
+
+      doc.fillColor('#9ca3af').fontSize(12).font('Helvetica')
+        .text(`Data finalizării: ${completedDate}`, 0, 340, { align: 'center' });
+
+      doc.end();
+    });
   }
 
   async countByCourse(courseId: string): Promise<number> {

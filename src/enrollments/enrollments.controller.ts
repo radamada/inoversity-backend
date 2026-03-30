@@ -3,10 +3,12 @@ import {
   Get,
   Patch,
   Param,
+  Res,
   UseGuards,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { EnrollmentsService } from './enrollments.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -27,6 +29,21 @@ export class EnrollmentsController {
   @Get(':courseId/progress')
   getProgress(@CurrentUser() user: any, @Param('courseId') courseId: string) {
     return this.enrollmentsService.getProgress(user._id.toString(), courseId);
+  }
+
+  @Get(':courseId/certificate')
+  async getCertificate(
+    @CurrentUser() user: any,
+    @Param('courseId') courseId: string,
+    @Res() res: Response,
+  ) {
+    const pdf = await this.enrollmentsService.generateCertificate(user._id.toString(), courseId);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="certificat-${courseId}.pdf"`,
+      'Content-Length': pdf.length,
+    });
+    res.end(pdf);
   }
 
   @Patch(':courseId/lessons/:lessonId/progress')
