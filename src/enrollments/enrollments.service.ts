@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, ConflictException } from '@nestjs/common';
+import { join } from 'path';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDocument = require('pdfkit') as typeof import('pdfkit');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -241,12 +242,20 @@ export class EnrollmentsService {
     // Convert data URL to buffer
     const qrBuffer = Buffer.from(qrDataUrl.split(',')[1], 'base64');
 
+    const fontsDir = join(__dirname, '..', 'assets', 'fonts');
+    const fontRegular = join(fontsDir, 'Roboto-Regular.ttf');
+    const fontBold    = join(fontsDir, 'Roboto-Bold.ttf');
+
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 60 });
       const chunks: Buffer[] = [];
       doc.on('data', (c: Buffer) => chunks.push(c));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
+
+      // Register fonts cu suport Unicode/diacritice
+      doc.registerFont('Regular', fontRegular);
+      doc.registerFont('Bold', fontBold);
 
       // Background
       doc.rect(0, 0, doc.page.width, doc.page.height).fill('#f8f7ff');
@@ -258,10 +267,10 @@ export class EnrollmentsService {
         .lineWidth(1).stroke('#818cf8');
 
       // Title
-      doc.fillColor('#4f46e5').fontSize(14).font('Helvetica')
+      doc.fillColor('#4f46e5').fontSize(14).font('Regular')
         .text('EduInovatrium', 0, 70, { align: 'center' });
 
-      doc.fillColor('#1e1b4b').fontSize(36).font('Helvetica-Bold')
+      doc.fillColor('#1e1b4b').fontSize(36).font('Bold')
         .text('CERTIFICAT DE ABSOLVIRE', 0, 110, { align: 'center' });
 
       // Divider
@@ -269,24 +278,24 @@ export class EnrollmentsService {
         .lineWidth(1).stroke('#c7d2fe');
 
       // Body
-      doc.fillColor('#6b7280').fontSize(14).font('Helvetica')
+      doc.fillColor('#6b7280').fontSize(14).font('Regular')
         .text('Aceasta certifică faptul că', 0, 185, { align: 'center' });
 
-      doc.fillColor('#111827').fontSize(28).font('Helvetica-Bold')
+      doc.fillColor('#111827').fontSize(28).font('Bold')
         .text(studentName, 0, 215, { align: 'center' });
 
-      doc.fillColor('#6b7280').fontSize(14).font('Helvetica')
+      doc.fillColor('#6b7280').fontSize(14).font('Regular')
         .text('a finalizat cu succes cursul', 0, 260, { align: 'center' });
 
-      doc.fillColor('#4f46e5').fontSize(20).font('Helvetica-Bold')
+      doc.fillColor('#4f46e5').fontSize(20).font('Bold')
         .text(`"${courseTitle}"`, 0, 288, { align: 'center' });
 
-      doc.fillColor('#9ca3af').fontSize(12).font('Helvetica')
+      doc.fillColor('#9ca3af').fontSize(12).font('Regular')
         .text(`Data finalizării: ${completedDate}`, 0, 340, { align: 'center' });
 
       // QR Code (bottom right)
       doc.image(qrBuffer, doc.page.width - 140, doc.page.height - 140, { width: 90 });
-      doc.fillColor('#9ca3af').fontSize(8).font('Helvetica')
+      doc.fillColor('#9ca3af').fontSize(8).font('Regular')
         .text('Verifică autenticitatea', doc.page.width - 150, doc.page.height - 48, { width: 110, align: 'center' });
 
       doc.end();
