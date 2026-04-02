@@ -53,3 +53,4 @@ export class User {
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
+UserSchema.index({ passwordResetToken: 1 }, { sparse: true });

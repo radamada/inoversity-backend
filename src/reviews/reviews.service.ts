@@ -17,12 +17,19 @@ export class ReviewsService {
     private coursesService: CoursesService,
   ) {}
 
-  async getByCourse(courseId: string) {
-    return this.reviewModel
-      .find({ courseId: new Types.ObjectId(courseId) })
-      .populate('userId', 'name avatar')
-      .sort({ createdAt: -1 })
-      .exec();
+  async getByCourse(courseId: string, page = 1, limit = 20) {
+    const skip = (page - 1) * Math.min(limit, 50);
+    const [reviews, total] = await Promise.all([
+      this.reviewModel
+        .find({ courseId: new Types.ObjectId(courseId) })
+        .populate('userId', 'name avatar')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(Math.min(limit, 50))
+        .exec(),
+      this.reviewModel.countDocuments({ courseId: new Types.ObjectId(courseId) }),
+    ]);
+    return { reviews, total, page, pages: Math.ceil(total / Math.min(limit, 50)) };
   }
 
   async create(userId: string, courseId: string, rating: number, comment: string) {

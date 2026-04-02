@@ -46,6 +46,10 @@ export class MediaController {
     @Body('title') title: string,
   ) {
     if (!file) throw new BadRequestException('Niciun fișier primit');
+    const allowedVideoMimes = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm', 'video/x-matroska'];
+    if (!allowedVideoMimes.includes(file.mimetype)) {
+      throw new BadRequestException('Tip de fișier invalid. Sunt acceptate: MP4, MOV, AVI, WebM, MKV');
+    }
     return this.mediaService.uploadVideo(file, title);
   }
 
@@ -57,6 +61,10 @@ export class MediaController {
   @ApiOperation({ summary: 'Upload thumbnail imagine la Bunny.net Storage' })
   async uploadImage(@UploadedFile() file: Express.Multer.File) {
     if (!file) throw new BadRequestException('Niciun fișier primit');
+    const allowedImageMimes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowedImageMimes.includes(file.mimetype)) {
+      throw new BadRequestException('Tip de fișier invalid. Sunt acceptate: JPEG, PNG, WebP');
+    }
     const url = await this.mediaService.uploadImage(file.buffer, file.originalname, file.mimetype);
     return { url };
   }

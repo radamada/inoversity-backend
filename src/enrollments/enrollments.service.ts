@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, ConflictException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { join } from 'path';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDocument = require('pdfkit') as typeof import('pdfkit');
@@ -202,6 +203,7 @@ export class EnrollmentsService {
       ).length;
       if (currentIdsSet.size > 0 && validCount >= currentIdsSet.size) {
         enrollment.completedAt = new Date();
+        if (!enrollment.verificationCode) enrollment.verificationCode = randomUUID();
         await enrollment.save();
       }
     }
@@ -251,6 +253,7 @@ export class EnrollmentsService {
       ).length;
       if (currentIdsSet.size > 0 && validCount >= currentIdsSet.size) {
         enrollment.completedAt = new Date();
+        if (!enrollment.verificationCode) enrollment.verificationCode = randomUUID();
       }
     }
 
@@ -273,7 +276,11 @@ export class EnrollmentsService {
       day: 'numeric', month: 'long', year: 'numeric',
     });
 
-    const verifyUrl = `${process.env.FRONTEND_URL ?? 'http://localhost:3000'}/verify-certificate/${enrollment._id.toString()}`;
+    if (!process.env.FRONTEND_URL) {
+      console.warn('[Certificate] FRONTEND_URL env var is not set — verify URL will use localhost fallback');
+    }
+    const code = enrollment.verificationCode ?? enrollment._id.toString();
+    const verifyUrl = `${process.env.FRONTEND_URL ?? 'http://localhost:3000'}/verify-certificate/${code}`;
     const qrDataUrl: string = await QRCode.toDataURL(verifyUrl, { width: 100, margin: 1 });
     // Convert data URL to buffer
     const qrBuffer = Buffer.from(qrDataUrl.split(',')[1], 'base64');
@@ -428,9 +435,15 @@ export class EnrollmentsService {
     });
   }
 
-  async verifyCertificate(enrollmentId: string): Promise<object> {
+  async verifyCertificate(code: string): Promise<object> {
+    // Look up by UUID verificationCode; fall back to ObjectId for legacy certificates
+    const isObjectId = /^[a-f\d]{24}$/i.test(code);
+    const query = isObjectId
+      ? { $or: [{ verificationCode: code }, { _id: new Types.ObjectId(code) }], status: 'active' }
+      : { verificationCode: code, status: 'active' };
+
     const enrollment = await this.enrollmentModel
-      .findOne({ _id: new Types.ObjectId(enrollmentId), status: 'active' })
+      .findOne(query)
       .populate<{ courseId: { title: string; slug: string } }>('courseId', 'title slug')
       .populate<{ userId: { name: string } }>('userId', 'name')
       .exec();

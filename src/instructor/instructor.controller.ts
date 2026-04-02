@@ -13,7 +13,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { IsString, IsOptional, IsBoolean, IsNumber, Min, MinLength } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsNumber, Min, Max, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { InstructorService } from './instructor.service';
@@ -37,6 +37,7 @@ class PaginationDto {
   @Type(() => Number)
   @IsNumber()
   @Min(1)
+  @Max(100)
   limit?: number = 20;
 }
 

@@ -4,11 +4,11 @@ import {
   Post,
   Body,
   Param,
+  Query,
   UseGuards,
-  Optional,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { Throttle } from '@nestjs/throttler';
@@ -27,7 +27,23 @@ class CreateReviewDto {
   @ApiProperty()
   @IsOptional()
   @IsString()
+  @MaxLength(5000)
   comment?: string;
+}
+
+class ReviewPaginationDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @Max(50)
+  limit?: number = 20;
 }
 
 @ApiTags('Reviews')
@@ -36,8 +52,8 @@ export class ReviewsController {
   constructor(private readonly reviewsService: ReviewsService) {}
 
   @Get(':courseId')
-  getByCourse(@Param('courseId') courseId: string) {
-    return this.reviewsService.getByCourse(courseId);
+  getByCourse(@Param('courseId') courseId: string, @Query() q: ReviewPaginationDto) {
+    return this.reviewsService.getByCourse(courseId, q.page, q.limit);
   }
 
   @Post(':courseId')

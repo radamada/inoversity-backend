@@ -21,6 +21,7 @@ export class CreateCourseDto {
   @ApiProperty()
   @IsString()
   @MinLength(10)
+  @MaxLength(50000)
   description: string;
 
   @ApiProperty({ example: 109.99 })

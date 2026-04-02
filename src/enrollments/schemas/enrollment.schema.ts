@@ -25,7 +25,13 @@ export class Enrollment {
 
   @Prop({ type: String, enum: ['active', 'refunded'], default: 'active' })
   status: 'active' | 'refunded';
+
+  /** UUID used for certificate verification URL — not guessable like ObjectId */
+  @Prop({ type: String, default: null })
+  verificationCode: string | null;
 }
 
 export const EnrollmentSchema = SchemaFactory.createForClass(Enrollment);
 EnrollmentSchema.index({ userId: 1, courseId: 1 }, { unique: true });
+EnrollmentSchema.index({ status: 1, orderId: 1 });
+EnrollmentSchema.index({ verificationCode: 1 }, { sparse: true });

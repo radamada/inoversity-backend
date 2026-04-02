@@ -19,6 +19,7 @@ import {
   IsBoolean,
   IsNumber,
   Min,
+  Max,
   IsArray,
   MinLength,
   MaxLength,
@@ -107,6 +108,7 @@ class PaginationDto {
   @Type(() => Number)
   @IsNumber()
   @Min(1)
+  @Max(100)
   limit?: number = 20;
 }
 

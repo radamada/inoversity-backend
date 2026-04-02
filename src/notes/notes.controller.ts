@@ -3,10 +3,11 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { NotesService } from './notes.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { IsString } from 'class-validator';
+import { IsString, MaxLength } from 'class-validator';
 
 class UpsertNoteDto {
   @IsString()
+  @MaxLength(20000)
   content: string;
 }
 
