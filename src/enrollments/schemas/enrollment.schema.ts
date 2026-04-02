@@ -11,8 +11,8 @@ export class Enrollment {
   @Prop({ type: Types.ObjectId, ref: 'Course', required: true })
   courseId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Order', required: true })
-  orderId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Order', required: false, default: null })
+  orderId: Types.ObjectId | null;
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Lesson' }], default: [] })
   completedLessons: Types.ObjectId[];

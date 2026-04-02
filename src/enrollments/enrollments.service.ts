@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, ConflictException } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDocument = require('pdfkit') as typeof import('pdfkit');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const QRCode = require('qrcode');
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Enrollment, EnrollmentDocument } from './schemas/enrollment.schema';
@@ -35,10 +37,66 @@ export class EnrollmentsService {
       courseId: new Types.ObjectId(courseId),
       orderId: new Types.ObjectId(orderId),
     });
-    const saved = await enrollment.save();
-    await this.courseModel.findByIdAndUpdate(courseId, { $inc: { enrollmentCount: 1 } });
-    return saved;
+    try {
+      const saved = await enrollment.save();
+      await this.courseModel.findByIdAndUpdate(courseId, { $inc: { enrollmentCount: 1 } });
+      return saved;
+    } catch (err: any) {
+      if (err?.code === 11000) {
+        // Duplicate key — race condition, enrollment already exists
+        const existing = await this.enrollmentModel.findOne({
+          userId: new Types.ObjectId(userId),
+          courseId: new Types.ObjectId(courseId),
+        });
+        if (existing) return existing;
+        throw new ConflictException('Utilizatorul este deja înscris la acest curs');
+      }
+      throw err;
+    }
   }
+
+  // ── Owner / Admin bypass ───────────────────────────────────────────────────
+
+  /** Returns true if the user is the instructor of this course */
+  private async isCourseOwner(userId: string, courseId: string): Promise<boolean> {
+    const course = await this.courseModel
+      .findById(courseId)
+      .select('instructorId')
+      .lean();
+    return !!course && course.instructorId.toString() === userId;
+  }
+
+  /**
+   * Auto-creates an enrollment for a course owner/admin (no orderId).
+   * Idempotent — safe to call multiple times.
+   */
+  private async autoEnroll(userId: string, courseId: string): Promise<EnrollmentDocument> {
+    const existing = await this.enrollmentModel.findOne({
+      userId: new Types.ObjectId(userId),
+      courseId: new Types.ObjectId(courseId),
+    });
+    if (existing) return existing;
+
+    try {
+      const enrollment = new this.enrollmentModel({
+        userId: new Types.ObjectId(userId),
+        courseId: new Types.ObjectId(courseId),
+        orderId: null,
+      });
+      return await enrollment.save();
+    } catch (err: any) {
+      if (err?.code === 11000) {
+        const found = await this.enrollmentModel.findOne({
+          userId: new Types.ObjectId(userId),
+          courseId: new Types.ObjectId(courseId),
+        });
+        if (found) return found;
+      }
+      throw err;
+    }
+  }
+
+  // ── isEnrolled ────────────────────────────────────────────────────────────
 
   async isEnrolled(userId: string, courseId: string): Promise<boolean> {
     const count = await this.enrollmentModel.countDocuments({
@@ -46,7 +104,8 @@ export class EnrollmentsService {
       courseId: new Types.ObjectId(courseId),
       status: 'active',
     });
-    return count > 0;
+    if (count > 0) return true;
+    return this.isCourseOwner(userId, courseId);
   }
 
   async revokeEnrollments(userId: string, courseIds: string[]): Promise<void> {
@@ -65,6 +124,26 @@ export class EnrollmentsService {
   }
 
   async getMyEnrollments(userId: string) {
+    // Auto-create enrollments for courses this user owns (instructor/admin)
+    const ownedCourses = await this.courseModel
+      .find({ instructorId: new Types.ObjectId(userId), published: true })
+      .select('_id')
+      .lean();
+
+    if (ownedCourses.length > 0) {
+      const existingEnrollments = await this.enrollmentModel
+        .find({ userId: new Types.ObjectId(userId) })
+        .select('courseId')
+        .lean();
+      const enrolledIds = new Set(existingEnrollments.map((e) => e.courseId.toString()));
+
+      await Promise.all(
+        ownedCourses
+          .filter((c) => !enrolledIds.has(c._id.toString()))
+          .map((c) => this.autoEnroll(userId, c._id.toString())),
+      );
+    }
+
     return this.enrollmentModel
       .find({ userId: new Types.ObjectId(userId) })
       .populate({
@@ -77,10 +156,17 @@ export class EnrollmentsService {
   }
 
   async getProgress(userId: string, courseId: string) {
-    const enrollment = await this.enrollmentModel.findOne({
+    let enrollment: EnrollmentDocument | null = await this.enrollmentModel.findOne({
       userId: new Types.ObjectId(userId),
       courseId: new Types.ObjectId(courseId),
     });
+    if (!enrollment) {
+      if (await this.isCourseOwner(userId, courseId)) {
+        enrollment = await this.autoEnroll(userId, courseId);
+      } else {
+        throw new NotFoundException('Nu ești înscris la acest curs');
+      }
+    }
     if (!enrollment) throw new NotFoundException('Nu ești înscris la acest curs');
     if (enrollment.status === 'refunded') throw new ForbiddenException('Accesul la acest curs a fost revocat');
 
@@ -99,10 +185,17 @@ export class EnrollmentsService {
   }
 
   async markLessonComplete(userId: string, courseId: string, lessonId: string) {
-    const enrollment = await this.enrollmentModel.findOne({
+    let enrollment: EnrollmentDocument | null = await this.enrollmentModel.findOne({
       userId: new Types.ObjectId(userId),
       courseId: new Types.ObjectId(courseId),
     });
+    if (!enrollment) {
+      if (await this.isCourseOwner(userId, courseId)) {
+        enrollment = await this.autoEnroll(userId, courseId);
+      } else {
+        throw new NotFoundException('Nu ești înscris la acest curs');
+      }
+    }
     if (!enrollment) throw new NotFoundException('Nu ești înscris la acest curs');
     if (enrollment.status === 'refunded') throw new ForbiddenException('Accesul la acest curs a fost revocat');
 
@@ -142,6 +235,11 @@ export class EnrollmentsService {
     const completedDate = enrollment.completedAt.toLocaleDateString('ro-RO', {
       day: 'numeric', month: 'long', year: 'numeric',
     });
+
+    const verifyUrl = `${process.env.FRONTEND_URL ?? 'http://localhost:3000'}/verify-certificate/${enrollment._id.toString()}`;
+    const qrDataUrl: string = await QRCode.toDataURL(verifyUrl, { width: 100, margin: 1 });
+    // Convert data URL to buffer
+    const qrBuffer = Buffer.from(qrDataUrl.split(',')[1], 'base64');
 
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 60 });
@@ -186,8 +284,33 @@ export class EnrollmentsService {
       doc.fillColor('#9ca3af').fontSize(12).font('Helvetica')
         .text(`Data finalizării: ${completedDate}`, 0, 340, { align: 'center' });
 
+      // QR Code (bottom right)
+      doc.image(qrBuffer, doc.page.width - 140, doc.page.height - 140, { width: 90 });
+      doc.fillColor('#9ca3af').fontSize(8).font('Helvetica')
+        .text('Verifică autenticitatea', doc.page.width - 150, doc.page.height - 48, { width: 110, align: 'center' });
+
       doc.end();
     });
+  }
+
+  async verifyCertificate(enrollmentId: string): Promise<object> {
+    const enrollment = await this.enrollmentModel
+      .findOne({ _id: new Types.ObjectId(enrollmentId), status: 'active' })
+      .populate<{ courseId: { title: string; slug: string } }>('courseId', 'title slug')
+      .populate<{ userId: { name: string } }>('userId', 'name')
+      .exec();
+
+    if (!enrollment || !enrollment.completedAt) {
+      throw new NotFoundException('Certificatul nu a putut fi verificat');
+    }
+
+    return {
+      valid: true,
+      studentName: (enrollment.userId as any).name,
+      courseTitle: (enrollment.courseId as any).title,
+      courseSlug: (enrollment.courseId as any).slug,
+      completedAt: enrollment.completedAt,
+    };
   }
 
   async countByCourse(courseId: string): Promise<number> {

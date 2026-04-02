@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { EnrollmentsService } from './enrollments.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -48,6 +49,7 @@ export class EnrollmentsController {
 
   @Patch(':courseId/lessons/:lessonId/progress')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60000, limit: 120 } })
   markLesson(
     @CurrentUser() user: any,
     @Param('courseId') courseId: string,
@@ -58,5 +60,16 @@ export class EnrollmentsController {
       courseId,
       lessonId,
     );
+  }
+}
+
+@ApiTags('Certificates')
+@Controller('certificates')
+export class CertificatesController {
+  constructor(private readonly enrollmentsService: EnrollmentsService) {}
+
+  @Get('verify/:code')
+  verifyCertificate(@Param('code') code: string) {
+    return this.enrollmentsService.verifyCertificate(code);
   }
 }

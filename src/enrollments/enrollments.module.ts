@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { EnrollmentsService } from './enrollments.service';
-import { EnrollmentsController } from './enrollments.controller';
+import { EnrollmentsController, CertificatesController } from './enrollments.controller';
 import { Enrollment, EnrollmentSchema } from './schemas/enrollment.schema';
 import { Lesson, LessonSchema } from '../courses/schemas/lesson.schema';
 import { Course, CourseSchema } from '../courses/schemas/course.schema';
@@ -15,7 +15,7 @@ import { Course, CourseSchema } from '../courses/schemas/course.schema';
     ]),
   ],
   providers: [EnrollmentsService],
-  controllers: [EnrollmentsController],
+  controllers: [EnrollmentsController, CertificatesController],
   exports: [EnrollmentsService],
 })
 export class EnrollmentsModule {}
