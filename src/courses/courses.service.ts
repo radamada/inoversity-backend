@@ -113,7 +113,16 @@ export class CoursesService {
       instructorId: new Types.ObjectId(instructorId),
       categoryId: dto.categoryId ? new Types.ObjectId(dto.categoryId) : null,
     });
-    return course.save();
+    try {
+      return await course.save();
+    } catch (err: any) {
+      if (err?.code === 11000 && err?.keyPattern?.slug) {
+        // Slug collision under concurrency — append random suffix and retry once
+        course.slug = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
+        return course.save();
+      }
+      throw err;
+    }
   }
 
   async update(id: string, dto: Partial<CreateCourseDto>, userId: string, isAdmin = false): Promise<CourseDocument> {

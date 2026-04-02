@@ -66,13 +66,23 @@ export class OrdersService {
 
     const total = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
 
-    // Create Stripe PaymentIntent
-    const paymentIntent = await this.stripe.paymentIntents.create({
-      amount: Math.round(total * 100), // RON in bani
-      currency: 'ron',
-      metadata: { userId },
-      automatic_payment_methods: { enabled: true },
-    });
+    // Create Stripe PaymentIntent — rollback coupon if this fails
+    let paymentIntent: Stripe.PaymentIntent;
+    try {
+      paymentIntent = await this.stripe.paymentIntents.create({
+        amount: Math.round(total * 100), // RON in bani
+        currency: 'ron',
+        metadata: { userId },
+        automatic_payment_methods: { enabled: true },
+      });
+    } catch (stripeErr: any) {
+      if (appliedCouponCode) {
+        await this.couponsService.rollbackUsage(appliedCouponCode, userId);
+      }
+      throw new BadRequestException(
+        `Eroare la crearea plății: ${stripeErr?.message ?? 'Eroare Stripe'}`,
+      );
+    }
 
     const order = new this.orderModel({
       userId: new Types.ObjectId(userId),

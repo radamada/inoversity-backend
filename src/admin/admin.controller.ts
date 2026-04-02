@@ -22,6 +22,7 @@ import {
   IsArray,
   MinLength,
   MaxLength,
+  IsEnum,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -36,7 +37,7 @@ import { CreateCourseDto } from '../courses/dto/create-course.dto';
 
 class SetRoleDto {
   @ApiProperty({ enum: ['student', 'instructor', 'admin'] })
-  @IsString()
+  @IsEnum(['student', 'instructor', 'admin'])
   role: string;
 }
 

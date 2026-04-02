@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, ForbiddenException, InternalServerErrorException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
@@ -151,13 +151,17 @@ export class MediaService {
     const uniqueName = `${Date.now()}-${normalizedFilename.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`;
     const uploadUrl = `https://storage.bunnycdn.com/${this.storageZoneName}/${folder}/${uniqueName}`;
 
-    await axios.put(uploadUrl, normalized.buffer, {
-      headers: {
-        AccessKey: this.storageApiKey,
-        'Content-Type': normalized.mimetype,
-      },
-      maxBodyLength: Infinity,
-    });
+    try {
+      await axios.put(uploadUrl, normalized.buffer, {
+        headers: {
+          AccessKey: this.storageApiKey,
+          'Content-Type': normalized.mimetype,
+        },
+        maxBodyLength: Infinity,
+      });
+    } catch {
+      throw new InternalServerErrorException('Eroare la încărcarea fișierului pe CDN');
+    }
 
     return `${this.storageCdnUrl}/${folder}/${uniqueName}`;
   }

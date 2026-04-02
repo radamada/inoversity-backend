@@ -15,20 +15,12 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { IsString } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { MediaService } from './media.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-
-class UploadUrlDto {
-  @ApiProperty({ example: 'Lecția 1 – Introducere' })
-  @IsString()
-  title: string;
-}
 
 @ApiTags('Media')
 @ApiBearerAuth()
@@ -55,15 +47,6 @@ export class MediaController {
   ) {
     if (!file) throw new BadRequestException('Niciun fișier primit');
     return this.mediaService.uploadVideo(file, title);
-  }
-
-  @Post('upload-url')
-  @UseGuards(RolesGuard)
-  @Roles('admin', 'instructor')
-  @Throttle({ default: { ttl: 60000, limit: 20 } })
-  @ApiOperation({ summary: 'Obține URL upload direct Bunny.net' })
-  getUploadUrl(@Body() dto: UploadUrlDto) {
-    return this.mediaService.getUploadUrl(dto.title);
   }
 
   @Post('upload-image')

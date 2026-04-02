@@ -119,16 +119,27 @@ export class EnrollmentsService {
   }
 
   async revokeEnrollments(userId: string, courseIds: string[]): Promise<void> {
+    // Find only courses with active enrollments before revoking
+    const activeCourseIds = await this.enrollmentModel.distinct('courseId', {
+      userId: new Types.ObjectId(userId),
+      courseId: { $in: courseIds.map((id) => new Types.ObjectId(id)) },
+      status: 'active',
+    });
+
+    if (activeCourseIds.length === 0) return;
+
     await this.enrollmentModel.updateMany(
       {
         userId: new Types.ObjectId(userId),
-        courseId: { $in: courseIds.map((id) => new Types.ObjectId(id)) },
+        courseId: { $in: activeCourseIds },
         status: 'active',
       },
       { $set: { status: 'refunded' } },
     );
+
+    // Decrement only courses that actually had active enrollments
     await this.courseModel.updateMany(
-      { _id: { $in: courseIds.map((id) => new Types.ObjectId(id)) }, enrollmentCount: { $gt: 0 } },
+      { _id: { $in: activeCourseIds }, enrollmentCount: { $gt: 0 } },
       { $inc: { enrollmentCount: -1 } },
     );
   }

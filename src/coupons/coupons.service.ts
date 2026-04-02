@@ -7,7 +7,10 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Coupon, CouponDocument, DiscountType } from './schemas/coupon.schema';
+import { IsEnum, IsOptional, IsBoolean, IsNumber, IsString, Min, Max, IsDate } from 'class-validator';
+import { Type } from 'class-transformer';
+import { Coupon, CouponDocument } from './schemas/coupon.schema';
+import type { DiscountType } from './schemas/coupon.schema';
 import { randomBytes } from 'crypto';
 
 export interface CouponValidationResult {
@@ -22,16 +25,49 @@ export interface CouponValidationResult {
   maxUsesPerUser: number | null;
 }
 
-export interface CreateCouponDto {
+export class CreateCouponDto {
+  @IsOptional()
+  @IsString()
   code?: string;
+
+  @IsOptional()
+  @IsBoolean()
   random?: boolean;
+
+  @IsEnum(['percent', 'fixed'])
   discountType: DiscountType;
+
+  @IsNumber()
+  @Min(0)
+  @Max(100000)
   discountValue: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
   maxUses?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
   maxUsesPerUser?: number | null;
+
+  @IsOptional()
+  @Type(() => Date)
+  @IsDate()
   expiresAt?: Date | null;
+
+  @IsOptional()
+  @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
   minOrderAmount?: number;
+
+  @IsOptional()
+  @IsString()
   courseId?: string | null;
 }
 
@@ -109,24 +145,25 @@ export class CouponsService {
         $inc: { usedCount: 1 },
         ...(userId ? { $push: { usages: { userId: new Types.ObjectId(userId), usedAt: now } } } : {}),
       },
-      { new: false },
+      { new: true }, // post-update document so concurrent requests see the correct count
     ).lean();
 
     if (!coupon) {
       throw new BadRequestException('Codul de reducere nu este valid sau a expirat');
     }
 
-    // Per-user limit check (after atomic increment so we need to roll back if violated)
+    // Per-user limit check against post-update usages — handles concurrent requests correctly
     if (userId && coupon.maxUsesPerUser !== null && coupon.maxUsesPerUser !== undefined) {
       const userUsageCount = (coupon.usages ?? []).filter(
         (u) => u.userId.toString() === userId,
       ).length;
-      if (userUsageCount >= coupon.maxUsesPerUser) {
+      if (userUsageCount > coupon.maxUsesPerUser) {
+        // Roll back: remove the usage entry we just pushed and decrement count
         await this.couponModel.updateOne(
           { code: normalizedCode },
           {
             $inc: { usedCount: -1 },
-            $pop: { usages: 1 }, // remove last pushed element
+            $pop: { usages: 1 },
           },
         );
         throw new BadRequestException('Ai atins limita de utilizări pentru acest cod');
@@ -174,6 +211,17 @@ export class CouponsService {
       : orderTotal;
 
     return this.calculateDiscount(coupon.discountType, coupon.discountValue, relevantTotal);
+  }
+
+  // ── Internal: rollback a coupon usage if order creation failed ────────────
+
+  async rollbackUsage(code: string, userId?: string): Promise<void> {
+    const update: Record<string, any> = { $inc: { usedCount: -1 } };
+    if (userId) update.$pop = { usages: 1 };
+    await this.couponModel.updateOne(
+      { code: code.trim().toUpperCase() },
+      update,
+    );
   }
 
   // ── Admin: full CRUD over all coupons ──────────────────────────────────────
