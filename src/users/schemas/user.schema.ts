@@ -46,6 +46,10 @@ export class User {
 
   @Prop({ default: false })
   darkMode: boolean;
+
+  /** Incremented on logout to invalidate all existing refresh tokens */
+  @Prop({ default: 0 })
+  tokenVersion: number;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

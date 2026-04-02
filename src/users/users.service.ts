@@ -92,6 +92,10 @@ export class UsersService {
     return { users, total, page, pages: Math.ceil(total / limit) };
   }
 
+  async incrementTokenVersion(id: string): Promise<void> {
+    await this.userModel.updateOne({ _id: id }, { $inc: { tokenVersion: 1 } });
+  }
+
   async setRole(id: string, role: string): Promise<UserDocument> {
     const user = await this.userModel
       .findByIdAndUpdate(id, { role }, { new: true })

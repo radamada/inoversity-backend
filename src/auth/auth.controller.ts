@@ -62,15 +62,20 @@ export class AuthController {
     @CurrentUser() user: any,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.authService.refresh(user.sub, user.email, user.role);
+    const result = await this.authService.refresh(user.sub, user.email, user.role, user.tokenVersion ?? 0);
     this.setRefreshCookie(res, result.refreshToken);
     return { accessToken: result.accessToken };
   }
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(AuthGuard('jwt-refresh'))
   @ApiOperation({ summary: 'Delogare' })
-  logout(@Res({ passthrough: true }) res: Response) {
+  async logout(@CurrentUser() user: any, @Res({ passthrough: true }) res: Response) {
+    // Increment tokenVersion to invalidate all existing refresh tokens for this user
+    if (user?.sub) {
+      await this.authService.logout(user.sub);
+    }
     res.clearCookie('refresh_token', { path: '/api/auth/refresh' });
     res.clearCookie('user_role');
     return { message: 'Delogat cu succes' };

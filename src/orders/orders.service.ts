@@ -109,12 +109,13 @@ export class OrdersService {
   }
 
   async confirmPayment(paymentIntentId: string): Promise<void> {
-    const order = await this.orderModel.findOne({ stripePaymentIntentId: paymentIntentId });
-    if (!order || order.status !== 'pending') return;
-
-    order.status = 'paid';
-    order.stripeClientSecret = null;
-    await order.save();
+    // Atomic transition: prevents double-processing from Stripe webhook retries
+    const order = await this.orderModel.findOneAndUpdate(
+      { stripePaymentIntentId: paymentIntentId, status: 'pending' },
+      { $set: { status: 'paid', stripeClientSecret: null } },
+      { new: true },
+    );
+    if (!order) return; // already processed or not found
 
     // Enroll user in each course
     for (const item of order.items) {
@@ -167,9 +168,17 @@ export class OrdersService {
     }
 
     if (order.stripePaymentIntentId) {
-      await this.stripe.refunds.create({
-        payment_intent: order.stripePaymentIntentId,
-      });
+      try {
+        await this.stripe.refunds.create({
+          payment_intent: order.stripePaymentIntentId,
+        });
+      } catch (stripeErr: any) {
+        // Revert DB status — money not returned, don't revoke access
+        await this.orderModel.updateOne({ _id: orderId }, { $set: { status: 'paid' } });
+        throw new BadRequestException(
+          `Rambursarea Stripe a eșuat: ${stripeErr?.message ?? 'Eroare necunoscută'}`,
+        );
+      }
     }
 
     // Revoke enrollments

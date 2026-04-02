@@ -21,13 +21,18 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
     } as any);
   }
 
-  async validate(req: Request, payload: { sub: string; email: string; role: string }) {
+  async validate(req: Request, payload: { sub: string; email: string; role: string; tokenVersion?: number }) {
     const token = (req as any).cookies?.['refresh_token'];
     if (!token) throw new UnauthorizedException();
 
     const user = await this.usersService.findById(payload.sub);
     if (!user) throw new UnauthorizedException();
     if (!user.isActive) throw new UnauthorizedException('ACCOUNT_BLOCKED');
+
+    // Invalidate tokens issued before the last logout
+    if ((payload.tokenVersion ?? 0) !== (user.tokenVersion ?? 0)) {
+      throw new UnauthorizedException('Token invalidat. Te rugăm să te autentifici din nou.');
+    }
 
     return { ...payload, refreshToken: token };
   }

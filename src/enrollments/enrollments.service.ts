@@ -19,20 +19,29 @@ export class EnrollmentsService {
   ) {}
 
   async enroll(userId: string, courseId: string, orderId: string): Promise<EnrollmentDocument> {
+    // Atomic: reactivate a refunded enrollment — prevents race conditions on re-enrollment
+    const reactivated = await this.enrollmentModel.findOneAndUpdate(
+      {
+        userId: new Types.ObjectId(userId),
+        courseId: new Types.ObjectId(courseId),
+        status: 'refunded',
+      },
+      { $set: { status: 'active', orderId: new Types.ObjectId(orderId) } },
+      { new: true },
+    );
+    if (reactivated) {
+      await this.courseModel.findByIdAndUpdate(courseId, { $inc: { enrollmentCount: 1 } });
+      return reactivated;
+    }
+
+    // Idempotent: return existing active enrollment without double-incrementing count
     const existing = await this.enrollmentModel.findOne({
       userId: new Types.ObjectId(userId),
       courseId: new Types.ObjectId(courseId),
     });
-    if (existing) {
-      if (existing.status === 'refunded') {
-        existing.status = 'active';
-        existing.orderId = new Types.ObjectId(orderId);
-        await existing.save();
-        await this.courseModel.findByIdAndUpdate(courseId, { $inc: { enrollmentCount: 1 } });
-      }
-      return existing;
-    }
+    if (existing) return existing;
 
+    // Create new enrollment
     const enrollment = new this.enrollmentModel({
       userId: new Types.ObjectId(userId),
       courseId: new Types.ObjectId(courseId),
@@ -44,12 +53,12 @@ export class EnrollmentsService {
       return saved;
     } catch (err: any) {
       if (err?.code === 11000) {
-        // Duplicate key — race condition, enrollment already exists
-        const existing = await this.enrollmentModel.findOne({
+        // Race condition: another concurrent request just created it — count already incremented by it
+        const found = await this.enrollmentModel.findOne({
           userId: new Types.ObjectId(userId),
           courseId: new Types.ObjectId(courseId),
         });
-        if (existing) return existing;
+        if (found) return found;
         throw new ConflictException('Utilizatorul este deja înscris la acest curs');
       }
       throw err;
@@ -173,10 +182,14 @@ export class EnrollmentsService {
 
     // Retroactive completion check — handles enrollments completed before completedAt logic existed
     if (!enrollment.completedAt && enrollment.completedLessons.length > 0) {
-      const totalLessons = await this.lessonModel.countDocuments({
-        courseId: new Types.ObjectId(courseId),
-      });
-      if (totalLessons > 0 && enrollment.completedLessons.length >= totalLessons) {
+      const currentLessonIds = await this.lessonModel
+        .find({ courseId: new Types.ObjectId(courseId) })
+        .distinct('_id');
+      const currentIdsSet = new Set(currentLessonIds.map((id: any) => id.toString()));
+      const validCount = enrollment.completedLessons.filter((id) =>
+        currentIdsSet.has(id.toString()),
+      ).length;
+      if (currentIdsSet.size > 0 && validCount >= currentIdsSet.size) {
         enrollment.completedAt = new Date();
         await enrollment.save();
       }
@@ -200,6 +213,13 @@ export class EnrollmentsService {
     if (!enrollment) throw new NotFoundException('Nu ești înscris la acest curs');
     if (enrollment.status === 'refunded') throw new ForbiddenException('Accesul la acest curs a fost revocat');
 
+    // Validate that the lesson actually belongs to this course (prevents count inflation)
+    const lessonExists = await this.lessonModel.exists({
+      _id: new Types.ObjectId(lessonId),
+      courseId: new Types.ObjectId(courseId),
+    });
+    if (!lessonExists) throw new NotFoundException('Lecția nu există în acest curs');
+
     const lessonOid = new Types.ObjectId(lessonId);
     const alreadyDone = enrollment.completedLessons.some(
       (id) => id.toString() === lessonId,
@@ -210,10 +230,15 @@ export class EnrollmentsService {
     enrollment.lastAccessedAt = new Date();
 
     if (!enrollment.completedAt) {
-      const totalLessons = await this.lessonModel.countDocuments({
-        courseId: new Types.ObjectId(courseId),
-      });
-      if (totalLessons > 0 && enrollment.completedLessons.length >= totalLessons) {
+      // Count only lessons that still exist in the course (handles instructor deleting lessons)
+      const currentLessonIds = await this.lessonModel
+        .find({ courseId: new Types.ObjectId(courseId) })
+        .distinct('_id');
+      const currentIdsSet = new Set(currentLessonIds.map((id: any) => id.toString()));
+      const validCount = enrollment.completedLessons.filter((id) =>
+        currentIdsSet.has(id.toString()),
+      ).length;
+      if (currentIdsSet.size > 0 && validCount >= currentIdsSet.size) {
         enrollment.completedAt = new Date();
       }
     }

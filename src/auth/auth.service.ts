@@ -56,8 +56,12 @@ export class AuthService {
     return this.buildTokenPair(user);
   }
 
-  async refresh(userId: string, email: string, role: string) {
-    return this.buildTokenPair({ _id: userId, email, role } as any);
+  async refresh(userId: string, email: string, role: string, tokenVersion: number) {
+    return this.buildTokenPair({ _id: userId, email, role, tokenVersion } as any);
+  }
+
+  async logout(userId: string): Promise<void> {
+    await this.usersService.incrementTokenVersion(userId);
   }
 
   async forgotPassword(email: string): Promise<void> {
@@ -72,11 +76,12 @@ export class AuthService {
     await this.usersService.resetPassword(token, newPassword);
   }
 
-  private buildTokenPair(user: UserDocument | { _id: any; email: string; role: string }) {
+  private buildTokenPair(user: UserDocument | { _id: any; email: string; role: string; tokenVersion?: number }) {
     const payload = {
       sub: (user as any)._id?.toString() ?? (user as any).sub,
       email: user.email,
       role: user.role,
+      tokenVersion: (user as any).tokenVersion ?? 0,
     };
 
     const accessToken = this.jwtService.sign(payload, {
