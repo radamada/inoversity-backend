@@ -247,56 +247,104 @@ export class EnrollmentsService {
     const fontBold    = join(fontsDir, 'Roboto-Bold.ttf');
 
     return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 60 });
+      // autoFirstPage: false ca să nu creeze pagini extra automat
+      const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 0, autoFirstPage: false });
       const chunks: Buffer[] = [];
       doc.on('data', (c: Buffer) => chunks.push(c));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      // Register fonts cu suport Unicode/diacritice
+      doc.addPage();
+
       doc.registerFont('Regular', fontRegular);
       doc.registerFont('Bold', fontBold);
 
-      // Background
-      doc.rect(0, 0, doc.page.width, doc.page.height).fill('#f8f7ff');
+      const W = doc.page.width;   // 841.89
+      const H = doc.page.height;  // 595.28
 
-      // Border
-      doc.rect(20, 20, doc.page.width - 40, doc.page.height - 40)
-        .lineWidth(3).stroke('#4f46e5');
-      doc.rect(28, 28, doc.page.width - 56, doc.page.height - 56)
-        .lineWidth(1).stroke('#818cf8');
+      // ── Fundal alb cald ──────────────────────────────────────────
+      doc.rect(0, 0, W, H).fill('#fafafa');
 
-      // Title
-      doc.fillColor('#4f46e5').fontSize(14).font('Regular')
-        .text('EduInovatrium', 0, 70, { align: 'center' });
+      // ── Bandă header indigo ──────────────────────────────────────
+      doc.rect(0, 0, W, 72).fill('#4f46e5');
+      // Linie subțire accent deasupra benzii
+      doc.rect(0, 0, W, 4).fill('#818cf8');
 
-      doc.fillColor('#1e1b4b').fontSize(36).font('Bold')
-        .text('CERTIFICAT DE ABSOLVIRE', 0, 110, { align: 'center' });
+      // Numele platformei în header (alb)
+      doc.fillColor('#ffffff').fontSize(13).font('Regular')
+        .text('EduInovatrium', 0, 26, { align: 'center', lineBreak: false, width: W });
 
-      // Divider
-      doc.moveTo(180, 165).lineTo(doc.page.width - 180, 165)
-        .lineWidth(1).stroke('#c7d2fe');
+      // ── Bordură elegantă ─────────────────────────────────────────
+      doc.rect(18, 18, W - 36, H - 36).lineWidth(0.5).strokeColor('#c7d2fe').stroke();
+      doc.rect(22, 22, W - 44, H - 44).lineWidth(2).strokeColor('#4f46e5').stroke();
 
-      // Body
-      doc.fillColor('#6b7280').fontSize(14).font('Regular')
-        .text('Aceasta certifică faptul că', 0, 185, { align: 'center' });
+      // ── Medalion decorativ stânga ────────────────────────────────
+      const cx = 108, cy = H / 2 + 10;
+      doc.circle(cx, cy, 44).fill('#eef2ff');
+      doc.circle(cx, cy, 44).lineWidth(1.5).strokeColor('#818cf8').stroke();
+      doc.circle(cx, cy, 36).lineWidth(0.5).strokeColor('#c7d2fe').stroke();
+      // Stea simplă cu linii
+      for (let i = 0; i < 8; i++) {
+        const angle = (i * Math.PI) / 4;
+        const x1 = cx + 20 * Math.cos(angle);
+        const y1 = cy + 20 * Math.sin(angle);
+        const x2 = cx + 30 * Math.cos(angle);
+        const y2 = cy + 30 * Math.sin(angle);
+        doc.moveTo(x1, y1).lineTo(x2, y2).lineWidth(1).strokeColor('#818cf8').stroke();
+      }
+      doc.fillColor('#4f46e5').fontSize(9).font('Bold')
+        .text('CERTIFICAT', cx - 24, cy - 6, { lineBreak: false })
+        .text('VERIFICAT', cx - 20, cy + 4, { lineBreak: false });
 
-      doc.fillColor('#111827').fontSize(28).font('Bold')
-        .text(studentName, 0, 215, { align: 'center' });
+      // ── Titlu principal ──────────────────────────────────────────
+      doc.fillColor('#1e1b4b').fontSize(30).font('Bold')
+        .text('CERTIFICAT DE ABSOLVIRE', 0, 92, { align: 'center', lineBreak: false, width: W });
 
-      doc.fillColor('#6b7280').fontSize(14).font('Regular')
-        .text('a finalizat cu succes cursul', 0, 260, { align: 'center' });
+      // ── Linie decorativă sub titlu ───────────────────────────────
+      const lineY = 138;
+      doc.moveTo(220, lineY).lineTo(W / 2 - 20, lineY).lineWidth(1).strokeColor('#818cf8').stroke();
+      doc.circle(W / 2, lineY, 4).fill('#4f46e5');
+      doc.moveTo(W / 2 + 20, lineY).lineTo(W - 220, lineY).lineWidth(1).strokeColor('#818cf8').stroke();
 
-      doc.fillColor('#4f46e5').fontSize(20).font('Bold')
-        .text(`"${courseTitle}"`, 0, 288, { align: 'center' });
+      // ── Corp text ────────────────────────────────────────────────
+      doc.fillColor('#6b7280').fontSize(13).font('Regular')
+        .text('Aceasta certifică faptul că', 0, 158, { align: 'center', lineBreak: false, width: W });
 
-      doc.fillColor('#9ca3af').fontSize(12).font('Regular')
-        .text(`Data finalizării: ${completedDate}`, 0, 340, { align: 'center' });
+      doc.fillColor('#111827').fontSize(30).font('Bold')
+        .text(studentName, 0, 182, { align: 'center', lineBreak: false, width: W });
 
-      // QR Code (bottom right)
-      doc.image(qrBuffer, doc.page.width - 140, doc.page.height - 140, { width: 90 });
-      doc.fillColor('#9ca3af').fontSize(8).font('Regular')
-        .text('Verifică autenticitatea', doc.page.width - 150, doc.page.height - 48, { width: 110, align: 'center' });
+      // Linie subțire sub nume
+      doc.moveTo(W / 2 - 120, 222).lineTo(W / 2 + 120, 222)
+        .lineWidth(0.5).strokeColor('#e0e7ff').stroke();
+
+      doc.fillColor('#6b7280').fontSize(13).font('Regular')
+        .text('a finalizat cu succes cursul', 0, 234, { align: 'center', lineBreak: false, width: W });
+
+      doc.fillColor('#4f46e5').fontSize(18).font('Bold')
+        .text(`"${courseTitle}"`, 0, 260, { align: 'center', lineBreak: false, width: W });
+
+      // ── Data ─────────────────────────────────────────────────────
+      doc.fillColor('#9ca3af').fontSize(11).font('Regular')
+        .text(`Data finalizării: ${completedDate}`, 0, 304, { align: 'center', lineBreak: false, width: W });
+
+      // ── Linie semnătură ──────────────────────────────────────────
+      doc.moveTo(300, 360).lineTo(540, 360).lineWidth(0.5).strokeColor('#d1d5db').stroke();
+      doc.fillColor('#9ca3af').fontSize(9).font('Regular')
+        .text('Semnătură autorizată', 300, 365, { lineBreak: false, width: 240, align: 'center' });
+
+      // ── QR Code — poziție fixă în interiorul paginii ─────────────
+      const qrX = W - 130;
+      const qrY = H - 130;
+      doc.image(qrBuffer, qrX, qrY, { width: 80 });
+      doc.fillColor('#9ca3af').fontSize(7).font('Regular')
+        .text('Verifică autenticitatea', qrX - 5, qrY + 82, { width: 90, align: 'center', lineBreak: false });
+
+      // ── Bandă footer ─────────────────────────────────────────────
+      doc.rect(0, H - 28, W, 28).fill('#f0f4ff');
+      doc.fillColor('#818cf8').fontSize(8).font('Regular')
+        .text('www.eduinovatrium.ro  ·  Certificat generat electronic', 0, H - 18, {
+          align: 'center', lineBreak: false, width: W,
+        });
 
       doc.end();
     });
