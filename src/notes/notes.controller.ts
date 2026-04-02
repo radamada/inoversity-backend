@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { NotesService } from './notes.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 import { IsString, MaxLength } from 'class-validator';
 
 class UpsertNoteDto {
@@ -21,8 +22,8 @@ export class NotesController {
   @Get(':courseId/:lessonId')
   getNote(
     @CurrentUser() user: any,
-    @Param('courseId') courseId: string,
-    @Param('lessonId') lessonId: string,
+    @Param('courseId', ParseObjectIdPipe) courseId: string,
+    @Param('lessonId', ParseObjectIdPipe) lessonId: string,
   ) {
     return this.notesService.getNote(user._id, courseId, lessonId);
   }
@@ -30,8 +31,8 @@ export class NotesController {
   @Put(':courseId/:lessonId')
   upsertNote(
     @CurrentUser() user: any,
-    @Param('courseId') courseId: string,
-    @Param('lessonId') lessonId: string,
+    @Param('courseId', ParseObjectIdPipe) courseId: string,
+    @Param('lessonId', ParseObjectIdPipe) lessonId: string,
     @Body() dto: UpsertNoteDto,
   ) {
     return this.notesService.upsertNote(user._id, courseId, lessonId, dto.content);
@@ -40,7 +41,7 @@ export class NotesController {
   @Get(':courseId')
   getCourseNotes(
     @CurrentUser() user: any,
-    @Param('courseId') courseId: string,
+    @Param('courseId', ParseObjectIdPipe) courseId: string,
   ) {
     return this.notesService.getCourseNotes(user._id, courseId);
   }

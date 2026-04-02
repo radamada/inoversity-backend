@@ -14,6 +14,7 @@ import { Throttle } from '@nestjs/throttler';
 import { EnrollmentsService } from './enrollments.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 
 @ApiTags('Enrollments')
 @ApiBearerAuth()
@@ -28,14 +29,14 @@ export class EnrollmentsController {
   }
 
   @Get(':courseId/progress')
-  getProgress(@CurrentUser() user: any, @Param('courseId') courseId: string) {
+  getProgress(@CurrentUser() user: any, @Param('courseId', ParseObjectIdPipe) courseId: string) {
     return this.enrollmentsService.getProgress(user._id.toString(), courseId);
   }
 
   @Get(':courseId/certificate')
   async getCertificate(
     @CurrentUser() user: any,
-    @Param('courseId') courseId: string,
+    @Param('courseId', ParseObjectIdPipe) courseId: string,
     @Res() res: Response,
   ) {
     const pdf = await this.enrollmentsService.generateCertificate(user._id.toString(), courseId);
@@ -52,8 +53,8 @@ export class EnrollmentsController {
   @Throttle({ default: { ttl: 60000, limit: 120 } })
   markLesson(
     @CurrentUser() user: any,
-    @Param('courseId') courseId: string,
-    @Param('lessonId') lessonId: string,
+    @Param('courseId', ParseObjectIdPipe) courseId: string,
+    @Param('lessonId', ParseObjectIdPipe) lessonId: string,
   ) {
     return this.enrollmentsService.markLessonComplete(
       user._id.toString(),

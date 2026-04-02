@@ -13,6 +13,7 @@ import { Throttle } from '@nestjs/throttler';
 import { WishlistService } from './wishlist.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 
 @ApiTags('Wishlist')
 @ApiBearerAuth()
@@ -31,7 +32,7 @@ export class WishlistController {
   @HttpCode(HttpStatus.OK)
   addToWishlist(
     @CurrentUser() user: any,
-    @Param('courseId') courseId: string,
+    @Param('courseId', ParseObjectIdPipe) courseId: string,
   ) {
     return this.wishlistService.addToWishlist(user._id.toString(), courseId);
   }
@@ -40,7 +41,7 @@ export class WishlistController {
   @HttpCode(HttpStatus.NO_CONTENT)
   removeFromWishlist(
     @CurrentUser() user: any,
-    @Param('courseId') courseId: string,
+    @Param('courseId', ParseObjectIdPipe) courseId: string,
   ) {
     return this.wishlistService.removeFromWishlist(user._id.toString(), courseId);
   }

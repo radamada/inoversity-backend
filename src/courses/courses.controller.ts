@@ -19,6 +19,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 
 @ApiTags('Courses')
 @Controller('courses')
@@ -39,13 +40,13 @@ export class CoursesController {
 
   @Get(':id/curriculum')
   @ApiOperation({ summary: 'Curriculum curs (secțiuni + lecții)' })
-  getCurriculum(@Param('id') id: string) {
+  getCurriculum(@Param('id', ParseObjectIdPipe) id: string) {
     return this.coursesService.getCurriculum(id);
   }
 
   @Get(':id/also-bought')
   @ApiOperation({ summary: 'Cursuri cumpărate frecvent împreună' })
-  getAlsoBought(@Param('id') id: string) {
+  getAlsoBought(@Param('id', ParseObjectIdPipe) id: string) {
     return this.coursesService.getAlsoBought(id);
   }
 
@@ -62,7 +63,7 @@ export class CoursesController {
   @Roles('instructor', 'admin')
   @ApiBearerAuth()
   update(
-    @Param('id') id: string,
+    @Param('id', ParseObjectIdPipe) id: string,
     @Body() dto: Partial<CreateCourseDto>,
     @CurrentUser() user: any,
   ) {
@@ -74,7 +75,7 @@ export class CoursesController {
   @Roles('admin')
   @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
-  delete(@Param('id') id: string) {
+  delete(@Param('id', ParseObjectIdPipe) id: string) {
     return this.coursesService.delete(id);
   }
 }

@@ -13,6 +13,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { CartService } from './cart.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 import { IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -40,7 +41,7 @@ export class CartController {
   }
 
   @Delete('items/:courseId')
-  removeItem(@CurrentUser() user: any, @Param('courseId') courseId: string) {
+  removeItem(@CurrentUser() user: any, @Param('courseId', ParseObjectIdPipe) courseId: string) {
     return this.cartService.removeItem(user._id.toString(), courseId);
   }
 

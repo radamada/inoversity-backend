@@ -35,22 +35,28 @@ export class PaymentsController {
   @SkipThrottle()
   @ApiOperation({ summary: 'Stripe webhook – confirmare plată' })
   async handleWebhook(
-    @Req() req: Request,
+    @Req() req: any,
     @Res() res: Response,
     @Headers('stripe-signature') sig: string,
   ) {
     const webhookSecret = this.config.get<string>('STRIPE_WEBHOOK_SECRET');
     let event: Stripe.Event;
 
+    const rawBody: Buffer | undefined = req.rawBody;
+    if (!rawBody) {
+      this.logger.error('rawBody is not available — webhook signature verification will fail');
+      return res.status(500).send('Server configuration error');
+    }
+
     try {
       event = this.stripe.webhooks.constructEvent(
-        (req as any).rawBody ?? req.body,
+        rawBody,
         sig,
         webhookSecret ?? '',
       );
     } catch (err: any) {
       this.logger.error(`Webhook signature error: ${err.message}`);
-      return (res as any).status(400).send(`Webhook Error: ${err.message}`);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
     if (event.type === 'payment_intent.succeeded') {
@@ -63,6 +69,6 @@ export class PaymentsController {
       }
     }
 
-    (res as any).json({ received: true });
+    res.json({ received: true });
   }
 }

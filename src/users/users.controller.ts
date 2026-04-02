@@ -10,6 +10,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 
 @ApiTags('Users')
 @Controller('users')
@@ -26,7 +27,7 @@ export class UsersController {
   }
 
   @Get('instructors/:id')
-  getInstructorProfile(@Param('id') id: string) {
+  getInstructorProfile(@Param('id', ParseObjectIdPipe) id: string) {
     return this.usersService.getPublicInstructorProfile(id);
   }
 

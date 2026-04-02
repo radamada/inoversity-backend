@@ -11,6 +11,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { IsString, IsOptional, IsBoolean, IsNumber, Min, Max, MinLength } from 'class-validator';
@@ -25,6 +26,7 @@ import { CoursesService } from '../courses/courses.service';
 import { CreateCourseDto } from '../courses/dto/create-course.dto';
 import { CouponsService } from '../coupons/coupons.service';
 import type { CreateCouponDto } from '../coupons/coupons.service';
+import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 
 class PaginationDto {
   @IsOptional()
@@ -126,7 +128,7 @@ export class InstructorController {
 
   @Get('courses/:id')
   @ApiOperation({ summary: 'Un curs al meu după ID' })
-  getCourse(@Param('id') id: string, @CurrentUser() user: any) {
+  getCourse(@Param('id', ParseObjectIdPipe) id: string, @CurrentUser() user: any) {
     return this.instructorService.getCourseById(id, user._id.toString(), false);
   }
 
@@ -139,7 +141,7 @@ export class InstructorController {
   @Patch('courses/:id')
   @ApiOperation({ summary: 'Actualizare curs' })
   updateCourse(
-    @Param('id') id: string,
+    @Param('id', ParseObjectIdPipe) id: string,
     @Body() dto: Partial<CreateCourseDto>,
     @CurrentUser() user: any,
   ) {
@@ -148,27 +150,27 @@ export class InstructorController {
 
   @Patch('courses/:id/publish')
   @ApiOperation({ summary: 'Toggle publicare curs' })
-  togglePublish(@Param('id') id: string, @CurrentUser() user: any) {
+  togglePublish(@Param('id', ParseObjectIdPipe) id: string, @CurrentUser() user: any) {
     return this.instructorService.togglePublish(id, user._id.toString(), false);
   }
 
   @Patch('courses/:id/publish-changes')
   @ApiOperation({ summary: 'Publică modificările în așteptare' })
-  publishChanges(@Param('id') id: string, @CurrentUser() user: any) {
+  publishChanges(@Param('id', ParseObjectIdPipe) id: string, @CurrentUser() user: any) {
     return this.coursesService.publishPendingChanges(id, user._id.toString(), false);
   }
 
   @Delete('courses/:id/pending-changes')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Renunță la modificările în așteptare' })
-  discardChanges(@Param('id') id: string, @CurrentUser() user: any) {
+  discardChanges(@Param('id', ParseObjectIdPipe) id: string, @CurrentUser() user: any) {
     return this.coursesService.discardPendingChanges(id, user._id.toString(), false);
   }
 
   @Put('courses/:id/pending-curriculum')
   @ApiOperation({ summary: 'Salvează curriculumul ca modificări în așteptare' })
   savePendingCurriculum(
-    @Param('id') id: string,
+    @Param('id', ParseObjectIdPipe) id: string,
     @Body() body: { curriculum: any[] },
     @CurrentUser() user: any,
   ) {
@@ -187,7 +189,7 @@ export class InstructorController {
 
   @Post('courses/:courseId/sections')
   createSection(
-    @Param('courseId') courseId: string,
+    @Param('courseId', ParseObjectIdPipe) courseId: string,
     @Body() dto: CreateSectionDto,
     @CurrentUser() user: any,
   ) {
@@ -196,7 +198,7 @@ export class InstructorController {
 
   @Patch('sections/:id')
   updateSection(
-    @Param('id') id: string,
+    @Param('id', ParseObjectIdPipe) id: string,
     @Body() dto: UpdateSectionDto,
     @CurrentUser() user: any,
   ) {
@@ -205,7 +207,7 @@ export class InstructorController {
 
   @Delete('sections/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  deleteSection(@Param('id') id: string, @CurrentUser() user: any) {
+  deleteSection(@Param('id', ParseObjectIdPipe) id: string, @CurrentUser() user: any) {
     return this.instructorService.deleteSection(id, user._id.toString(), false);
   }
 
@@ -213,8 +215,8 @@ export class InstructorController {
 
   @Post('sections/:sectionId/lessons')
   createLesson(
-    @Param('sectionId') sectionId: string,
-    @Query('courseId') courseId: string,
+    @Param('sectionId', ParseObjectIdPipe) sectionId: string,
+    @Query('courseId', ParseObjectIdPipe) courseId: string,
     @Body() dto: CreateLessonDto,
     @CurrentUser() user: any,
   ) {
@@ -223,7 +225,7 @@ export class InstructorController {
 
   @Patch('lessons/:id')
   updateLesson(
-    @Param('id') id: string,
+    @Param('id', ParseObjectIdPipe) id: string,
     @Body() dto: Partial<CreateLessonDto>,
     @CurrentUser() user: any,
   ) {
@@ -232,7 +234,7 @@ export class InstructorController {
 
   @Delete('lessons/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  deleteLesson(@Param('id') id: string, @CurrentUser() user: any) {
+  deleteLesson(@Param('id', ParseObjectIdPipe) id: string, @CurrentUser() user: any) {
     return this.instructorService.deleteLesson(id, user._id.toString(), false);
   }
 
@@ -251,24 +253,38 @@ export class InstructorController {
   @Post('coupons')
   @ApiOperation({ summary: 'Creează cupon (custom sau random)' })
   @HttpCode(HttpStatus.CREATED)
-  createCoupon(@Body() dto: CreateCouponDto, @CurrentUser() user: any) {
+  async createCoupon(@Body() dto: CreateCouponDto, @CurrentUser() user: any) {
+    // Validate course ownership — prevent IDOR
+    if (dto.courseId) {
+      const course = await this.coursesService.findById(dto.courseId);
+      if (course.instructorId?.toString() !== user._id.toString()) {
+        throw new ForbiddenException('Nu poți crea cupoane pentru cursuri care nu îți aparțin');
+      }
+    }
     return this.couponsService.createForInstructor(dto, user._id.toString());
   }
 
   @Patch('coupons/:id')
   @ApiOperation({ summary: 'Actualizează cupon propriu' })
-  updateCoupon(
-    @Param('id') id: string,
+  async updateCoupon(
+    @Param('id', ParseObjectIdPipe) id: string,
     @Body() dto: Partial<CreateCouponDto>,
     @CurrentUser() user: any,
   ) {
+    // Validate course ownership on update too
+    if (dto.courseId) {
+      const course = await this.coursesService.findById(dto.courseId);
+      if (course.instructorId?.toString() !== user._id.toString()) {
+        throw new ForbiddenException('Nu poți asocia cupoane la cursuri care nu îți aparțin');
+      }
+    }
     return this.couponsService.updateForInstructor(id, dto, user._id.toString(), false);
   }
 
   @Delete('coupons/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Șterge cupon propriu' })
-  removeCoupon(@Param('id') id: string, @CurrentUser() user: any) {
+  removeCoupon(@Param('id', ParseObjectIdPipe) id: string, @CurrentUser() user: any) {
     return this.couponsService.removeForInstructor(id, user._id.toString(), false);
   }
 }

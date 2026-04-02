@@ -16,6 +16,7 @@ import { CategoriesService } from './categories.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 
 class CreateCategoryDto {
   @ApiProperty()
@@ -51,7 +52,7 @@ export class CategoriesController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @HttpCode(HttpStatus.NO_CONTENT)
-  delete(@Param('id') id: string) {
+  delete(@Param('id', ParseObjectIdPipe) id: string) {
     return this.categoriesService.delete(id);
   }
 }

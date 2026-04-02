@@ -26,24 +26,53 @@ export class AllExceptionsFilter implements ExceptionFilter {
       });
     }
 
+    // Mongoose ValidationError → 400
+    if (exception instanceof MongooseError.ValidationError) {
+      const messages = Object.values(exception.errors).map((e) => e.message);
+      return response.status(HttpStatus.BAD_REQUEST).json({
+        statusCode: HttpStatus.BAD_REQUEST,
+        timestamp: new Date().toISOString(),
+        message: messages.length === 1 ? messages[0] : messages,
+      });
+    }
+
+    // MongoDB duplicate key error (E11000) → 409
+    if (
+      exception &&
+      typeof exception === 'object' &&
+      'code' in exception &&
+      (exception as any).code === 11000
+    ) {
+      return response.status(HttpStatus.CONFLICT).json({
+        statusCode: HttpStatus.CONFLICT,
+        timestamp: new Date().toISOString(),
+        message: 'Înregistrare duplicată',
+      });
+    }
+
     const status =
       exception instanceof HttpException
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    const message =
-      exception instanceof HttpException
-        ? exception.getResponse()
-        : 'Eroare internă de server';
-
     if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(exception);
     }
 
-    response.status(status).json({
-      statusCode: status,
+    // For HttpExceptions, use NestJS response; for unknown errors, never leak details
+    if (exception instanceof HttpException) {
+      const exResponse = exception.getResponse();
+      return response.status(status).json({
+        statusCode: status,
+        timestamp: new Date().toISOString(),
+        ...(typeof exResponse === 'string' ? { message: exResponse } : (exResponse as object)),
+      });
+    }
+
+    response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+      statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       timestamp: new Date().toISOString(),
-      ...(typeof message === 'string' ? { message } : (message as object)),
+      message: 'Eroare internă de server',
     });
   }
 }

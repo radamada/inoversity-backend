@@ -15,6 +15,7 @@ import { Throttle } from '@nestjs/throttler';
 import { ReviewsService } from './reviews.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 
 class CreateReviewDto {
   @ApiProperty({ minimum: 1, maximum: 5 })
@@ -52,7 +53,7 @@ export class ReviewsController {
   constructor(private readonly reviewsService: ReviewsService) {}
 
   @Get(':courseId')
-  getByCourse(@Param('courseId') courseId: string, @Query() q: ReviewPaginationDto) {
+  getByCourse(@Param('courseId', ParseObjectIdPipe) courseId: string, @Query() q: ReviewPaginationDto) {
     return this.reviewsService.getByCourse(courseId, q.page, q.limit);
   }
 
@@ -61,7 +62,7 @@ export class ReviewsController {
   @UseGuards(JwtAuthGuard)
   @Throttle({ default: { ttl: 60000, limit: 5 } })
   create(
-    @Param('courseId') courseId: string,
+    @Param('courseId', ParseObjectIdPipe) courseId: string,
     @CurrentUser() user: any,
     @Body() dto: CreateReviewDto,
   ) {

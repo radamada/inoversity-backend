@@ -1,15 +1,30 @@
 import { Injectable, UnauthorizedException, BadRequestException, ForbiddenException, InternalServerErrorException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import * as crypto from 'crypto';
-import { createReadStream } from 'fs';
+import { createReadStream, readSync, openSync, closeSync } from 'fs';
 import { unlink } from 'fs/promises';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const heicConvert = require('heic-convert');
 import { EnrollmentsService } from '../enrollments/enrollments.service';
 import { Lesson, LessonDocument } from '../courses/schemas/lesson.schema';
+import { Course, CourseDocument } from '../courses/schemas/course.schema';
+
+/** Validate file content by checking magic bytes (file signatures) */
+function validateImageMagicBytes(buffer: Buffer): boolean {
+  if (buffer.length < 4) return false;
+  // JPEG: FF D8 FF
+  if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) return true;
+  // PNG: 89 50 4E 47
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) return true;
+  // WebP: RIFF....WEBP
+  if (buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return true;
+  // HEIC/HEIF: ....ftyp (at offset 4)
+  if (buffer.length >= 12 && buffer.toString('ascii', 4, 8) === 'ftyp') return true;
+  return false;
+}
 
 @Injectable()
 export class MediaService {
@@ -27,6 +42,7 @@ export class MediaService {
     private config: ConfigService,
     private enrollmentsService: EnrollmentsService,
     @InjectModel(Lesson.name) private lessonModel: Model<LessonDocument>,
+    @InjectModel(Course.name) private courseModel: Model<CourseDocument>,
   ) {
     this.apiKey = config.get<string>('BUNNY_STREAM_API_KEY') ?? '';
     this.libraryId = config.get<string>('BUNNY_STREAM_LIBRARY_ID') ?? '';
@@ -141,6 +157,9 @@ export class MediaService {
   }
 
   async uploadImage(buffer: Buffer, filename: string, mimetype: string, folder = 'thumbnails'): Promise<string> {
+    if (!validateImageMagicBytes(buffer)) {
+      throw new BadRequestException('Conținutul fișierului nu corespunde unui format de imagine valid');
+    }
     const normalized = await this.normalizeImage(buffer, mimetype);
 
     // Dacă a fost convertit din HEIC, înlocuiește extensia cu .jpg
@@ -164,6 +183,17 @@ export class MediaService {
     }
 
     return `${this.storageCdnUrl}/${folder}/${uniqueName}`;
+  }
+
+  /**
+   * Check if an image URL belongs to a course owned by the given user
+   */
+  async isImageOwnedByUser(cdnUrl: string, userId: string): Promise<boolean> {
+    const course = await this.courseModel.findOne({
+      thumbnail: cdnUrl,
+      instructorId: new Types.ObjectId(userId),
+    }).lean();
+    return !!course;
   }
 
   /**

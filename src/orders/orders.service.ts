@@ -66,6 +66,41 @@ export class OrdersService {
 
     const total = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
 
+    // Free order (100% coupon) — skip Stripe, mark as paid directly
+    if (total === 0) {
+      const order = new this.orderModel({
+        userId: new Types.ObjectId(userId),
+        items,
+        total: 0,
+        discountAmount: Math.round(discountAmount * 100) / 100,
+        couponCode: appliedCouponCode,
+        status: 'paid',
+      });
+      await order.save();
+
+      // Enroll user immediately
+      for (const item of order.items) {
+        await this.enrollmentsService.enroll(userId, item.courseId.toString(), order._id.toString());
+      }
+
+      const courseNames = order.items.map((i) => `"${i.title}"`).join(', ');
+      await this.notificationsService.create(
+        userId,
+        'purchase',
+        'Mulțumim pentru achiziție!',
+        `Ai dobândit acces la ${order.items.length === 1 ? 'cursul' : 'cursurile'} ${courseNames}. Mult succes la învățat!`,
+      );
+      await this.cartService.clearCart(userId);
+
+      return {
+        orderId: order._id,
+        clientSecret: null,
+        total: 0,
+        discountAmount: Math.round(discountAmount * 100) / 100,
+        subtotal,
+      };
+    }
+
     // Create Stripe PaymentIntent — rollback coupon if this fails
     let paymentIntent: Stripe.PaymentIntent;
     try {

@@ -73,8 +73,18 @@ export class MediaController {
   @UseGuards(RolesGuard)
   @Roles('admin', 'instructor')
   @ApiOperation({ summary: 'Șterge thumbnail din Bunny.net Storage' })
-  async deleteImage(@Query('url') url: string) {
+  async deleteImage(
+    @Query('url') url: string,
+    @CurrentUser() user: any,
+  ) {
     if (!url) throw new BadRequestException('Parametrul url lipsește');
+    // Admins can delete any image; instructors only their own course thumbnails
+    if (user.role !== 'admin') {
+      const ownsImage = await this.mediaService.isImageOwnedByUser(url, user._id.toString());
+      if (!ownsImage) {
+        throw new BadRequestException('Nu ai permisiunea să ștergi această imagine');
+      }
+    }
     await this.mediaService.deleteImage(url);
     return { success: true };
   }

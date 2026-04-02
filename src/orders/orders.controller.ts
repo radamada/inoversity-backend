@@ -16,6 +16,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 
 @ApiTags('Orders')
 @ApiBearerAuth()
@@ -54,7 +55,7 @@ export class OrdersController {
   }
 
   @Get(':id')
-  getOrder(@CurrentUser() user: any, @Param('id') id: string) {
+  getOrder(@CurrentUser() user: any, @Param('id', ParseObjectIdPipe) id: string) {
     return this.ordersService.getOrderById(id, user._id.toString());
   }
 }

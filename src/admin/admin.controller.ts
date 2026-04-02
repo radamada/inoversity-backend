@@ -34,6 +34,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 import { CreateCourseDto } from '../courses/dto/create-course.dto';
 
 class SetRoleDto {
@@ -148,13 +149,13 @@ export class AdminController {
 
   @Get('instructors/:id/stats')
   @ApiOperation({ summary: 'Statistici instructor specific' })
-  getInstructorStats(@Param('id') id: string) {
+  getInstructorStats(@Param('id', ParseObjectIdPipe) id: string) {
     return this.instructorService.getMyStats(id);
   }
 
   @Get('instructors/:id/monthly-revenue')
   @ApiOperation({ summary: 'Venituri lunare instructor specific' })
-  getInstructorMonthlyRevenue(@Param('id') id: string) {
+  getInstructorMonthlyRevenue(@Param('id', ParseObjectIdPipe) id: string) {
     return this.instructorService.getMonthlyRevenue(id);
   }
 
@@ -166,12 +167,12 @@ export class AdminController {
   }
 
   @Patch('users/:id/role')
-  setRole(@Param('id') id: string, @Body() dto: SetRoleDto) {
+  setRole(@Param('id', ParseObjectIdPipe) id: string, @Body() dto: SetRoleDto) {
     return this.adminService.setUserRole(id, dto.role);
   }
 
   @Patch('users/:id/active')
-  setActive(@Param('id') id: string, @Body() dto: SetActiveDto) {
+  setActive(@Param('id', ParseObjectIdPipe) id: string, @Body() dto: SetActiveDto) {
     return this.adminService.setUserActive(id, dto.isActive);
   }
 
@@ -183,7 +184,7 @@ export class AdminController {
   }
 
   @Patch('orders/:id/refund')
-  refundOrder(@Param('id') id: string) {
+  refundOrder(@Param('id', ParseObjectIdPipe) id: string) {
     return this.adminService.refundOrder(id);
   }
 
@@ -197,7 +198,7 @@ export class AdminController {
 
   @Get('courses/:id')
   @ApiOperation({ summary: 'Un curs după ID (admin)' })
-  getCourse(@Param('id') id: string) {
+  getCourse(@Param('id', ParseObjectIdPipe) id: string) {
     return this.coursesService.findById(id);
   }
 
@@ -211,32 +212,32 @@ export class AdminController {
   }
 
   @Patch('courses/:id')
-  updateCourse(@Param('id') id: string, @Body() dto: Partial<CreateCourseDto>, @CurrentUser() user: any) {
+  updateCourse(@Param('id', ParseObjectIdPipe) id: string, @Body() dto: Partial<CreateCourseDto>, @CurrentUser() user: any) {
     return this.coursesService.update(id, dto, user._id.toString(), true);
   }
 
   @Patch('courses/:id/publish')
-  togglePublish(@Param('id') id: string) {
+  togglePublish(@Param('id', ParseObjectIdPipe) id: string) {
     return this.coursesService.togglePublish(id);
   }
 
   @Patch('courses/:id/publish-changes')
   @ApiOperation({ summary: 'Publică modificările în așteptare' })
-  publishChanges(@Param('id') id: string, @CurrentUser() user: any) {
+  publishChanges(@Param('id', ParseObjectIdPipe) id: string, @CurrentUser() user: any) {
     return this.coursesService.publishPendingChanges(id, user._id.toString(), true);
   }
 
   @Delete('courses/:id/pending-changes')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Renunță la modificările în așteptare' })
-  discardChanges(@Param('id') id: string, @CurrentUser() user: any) {
+  discardChanges(@Param('id', ParseObjectIdPipe) id: string, @CurrentUser() user: any) {
     return this.coursesService.discardPendingChanges(id, user._id.toString(), true);
   }
 
   @Put('courses/:id/pending-curriculum')
   @ApiOperation({ summary: 'Salvează curriculumul ca modificări în așteptare' })
   savePendingCurriculum(
-    @Param('id') id: string,
+    @Param('id', ParseObjectIdPipe) id: string,
     @Body() body: { curriculum: any[] },
     @CurrentUser() user: any,
   ) {
@@ -245,25 +246,25 @@ export class AdminController {
 
   @Delete('courses/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  deleteCourse(@Param('id') id: string) {
+  deleteCourse(@Param('id', ParseObjectIdPipe) id: string) {
     return this.coursesService.delete(id);
   }
 
   // ── Sections ──────────────────────────────────────────────────────────────
 
   @Post('courses/:courseId/sections')
-  createSection(@Param('courseId') courseId: string, @Body() dto: CreateSectionDto) {
+  createSection(@Param('courseId', ParseObjectIdPipe) courseId: string, @Body() dto: CreateSectionDto) {
     return this.coursesService.createSection(courseId, dto.title);
   }
 
   @Patch('sections/:id')
-  updateSection(@Param('id') id: string, @Body() dto: UpdateSectionDto) {
+  updateSection(@Param('id', ParseObjectIdPipe) id: string, @Body() dto: UpdateSectionDto) {
     return this.coursesService.updateSection(id, dto);
   }
 
   @Delete('sections/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  deleteSection(@Param('id') id: string) {
+  deleteSection(@Param('id', ParseObjectIdPipe) id: string) {
     return this.coursesService.deleteSection(id);
   }
 
@@ -271,21 +272,21 @@ export class AdminController {
 
   @Post('sections/:sectionId/lessons')
   createLesson(
-    @Param('sectionId') sectionId: string,
-    @Query('courseId') courseId: string,
+    @Param('sectionId', ParseObjectIdPipe) sectionId: string,
+    @Query('courseId', ParseObjectIdPipe) courseId: string,
     @Body() dto: CreateLessonDto,
   ) {
     return this.coursesService.createLesson(sectionId, courseId, dto);
   }
 
   @Patch('lessons/:id')
-  updateLesson(@Param('id') id: string, @Body() dto: Partial<CreateLessonDto>) {
+  updateLesson(@Param('id', ParseObjectIdPipe) id: string, @Body() dto: Partial<CreateLessonDto>) {
     return this.coursesService.updateLesson(id, dto);
   }
 
   @Delete('lessons/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  deleteLesson(@Param('id') id: string) {
+  deleteLesson(@Param('id', ParseObjectIdPipe) id: string) {
     return this.coursesService.deleteLesson(id);
   }
 }

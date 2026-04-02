@@ -20,6 +20,7 @@ import type { CreateCouponDto } from './coupons.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 
 @ApiTags('Coupons')
 @Controller('coupons')
@@ -62,7 +63,7 @@ export class CouponsController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  update(@Param('id') id: string, @Body() dto: Partial<CreateCouponDto>) {
+  update(@Param('id', ParseObjectIdPipe) id: string, @Body() dto: Partial<CreateCouponDto>) {
     return this.couponsService.update(id, dto);
   }
 
@@ -71,7 +72,7 @@ export class CouponsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id') id: string) {
+  remove(@Param('id', ParseObjectIdPipe) id: string) {
     return this.couponsService.remove(id);
   }
 }
