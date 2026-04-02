@@ -6,6 +6,8 @@ import axios from 'axios';
 import * as crypto from 'crypto';
 import { createReadStream } from 'fs';
 import { unlink } from 'fs/promises';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const heicConvert = require('heic-convert');
 import { EnrollmentsService } from '../enrollments/enrollments.service';
 import { Lesson, LessonDocument } from '../courses/schemas/lesson.schema';
 
@@ -130,19 +132,34 @@ export class MediaService {
   /**
    * Upload an image to Bunny.net Storage and return the public CDN URL
    */
-  async uploadImage(buffer: Buffer, filename: string, mimetype: string): Promise<string> {
-    const uniqueName = `${Date.now()}-${filename.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`;
-    const uploadUrl = `https://storage.bunnycdn.com/${this.storageZoneName}/thumbnails/${uniqueName}`;
+  private async normalizeImage(buffer: Buffer, mimetype: string): Promise<{ buffer: Buffer; mimetype: string; ext: string }> {
+    if (mimetype === 'image/heic' || mimetype === 'image/heic-sequence' || mimetype === 'image/heif') {
+      const jpegBuffer: ArrayBuffer = await heicConvert({ buffer, format: 'JPEG', quality: 0.92 });
+      return { buffer: Buffer.from(jpegBuffer), mimetype: 'image/jpeg', ext: '.jpg' };
+    }
+    return { buffer, mimetype, ext: '' };
+  }
 
-    await axios.put(uploadUrl, buffer, {
+  async uploadImage(buffer: Buffer, filename: string, mimetype: string, folder = 'thumbnails'): Promise<string> {
+    const normalized = await this.normalizeImage(buffer, mimetype);
+
+    // Dacă a fost convertit din HEIC, înlocuiește extensia cu .jpg
+    const normalizedFilename = normalized.ext
+      ? filename.replace(/\.[^.]+$/, normalized.ext)
+      : filename;
+
+    const uniqueName = `${Date.now()}-${normalizedFilename.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`;
+    const uploadUrl = `https://storage.bunnycdn.com/${this.storageZoneName}/${folder}/${uniqueName}`;
+
+    await axios.put(uploadUrl, normalized.buffer, {
       headers: {
         AccessKey: this.storageApiKey,
-        'Content-Type': mimetype,
+        'Content-Type': normalized.mimetype,
       },
       maxBodyLength: Infinity,
     });
 
-    return `${this.storageCdnUrl}/thumbnails/${uniqueName}`;
+    return `${this.storageCdnUrl}/${folder}/${uniqueName}`;
   }
 
   /**
