@@ -47,10 +47,12 @@ export class InstructorService {
     const totalCourses = myCourses.length;
     const publishedCourses = myCourses.filter((c) => c.published).length;
 
-    const totalEnrollments =
-      courseIds.length > 0
-        ? await this.enrollmentModel.countDocuments({ courseId: { $in: courseIds } })
-        : 0;
+    const [totalEnrollments, uniqueStudents] = courseIds.length > 0
+      ? await Promise.all([
+          this.enrollmentModel.countDocuments({ courseId: { $in: courseIds }, orderId: { $ne: null } }),
+          this.enrollmentModel.distinct('userId', { courseId: { $in: courseIds }, orderId: { $ne: null } }).then((ids) => ids.length),
+        ])
+      : [0, 0];
 
     let totalRevenue = 0;
     if (courseIds.length > 0) {
@@ -69,7 +71,52 @@ export class InstructorService {
       }
     }
 
-    return { totalCourses, publishedCourses, totalEnrollments, totalRevenue };
+    return { totalCourses, publishedCourses, totalEnrollments, uniqueStudents, totalRevenue };
+  }
+
+  async getMonthlyRevenue(instructorId: string): Promise<{ month: string; revenue: number }[]> {
+    const myCourses = await this.courseModel
+      .find({ instructorId: new Types.ObjectId(instructorId) })
+      .select('_id')
+      .lean();
+
+    if (!myCourses.length) return this.emptyMonths();
+
+    const courseIds = myCourses.map((c) => c._id);
+
+    const raw = await this.orderModel.aggregate([
+      { $match: { status: 'paid', 'items.courseId': { $in: courseIds } } },
+      { $unwind: '$items' },
+      { $match: { 'items.courseId': { $in: courseIds } } },
+      {
+        $group: {
+          _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
+          revenue: { $sum: '$items.price' },
+        },
+      },
+      { $sort: { '_id.year': 1, '_id.month': 1 } },
+    ]);
+
+    // Build a map of "YYYY-MM" → revenue
+    const map = new Map<string, number>(
+      raw.map((r) => [
+        `${r._id.year}-${String(r._id.month).padStart(2, '0')}`,
+        Math.round(r.revenue * 100) / 100,
+      ]),
+    );
+
+    return this.emptyMonths().map((m) => ({ ...m, revenue: map.get(m.month) ?? 0 }));
+  }
+
+  private emptyMonths(): { month: string; revenue: number }[] {
+    const months: { month: string; revenue: number }[] = [];
+    const now = new Date();
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      months.push({ month: key, revenue: 0 });
+    }
+    return months;
   }
 
   // ── Orders ────────────────────────────────────────────────────────────────
@@ -84,24 +131,27 @@ export class InstructorService {
     if (courseIds.length === 0) return { orders: [], total: 0, page, pages: 0 };
 
     const skip = (page - 1) * limit;
+    const filter = { status: { $in: ['paid', 'refunded'] }, 'items.courseId': { $in: courseIds } };
     const [orders, total] = await Promise.all([
       this.orderModel
-        .find({ status: 'paid', 'items.courseId': { $in: courseIds } })
+        .find(filter)
         .populate('userId', 'name email')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean(),
-      this.orderModel.countDocuments({ status: 'paid', 'items.courseId': { $in: courseIds } }),
+      this.orderModel.countDocuments(filter),
     ]);
 
     const courseIdSet = new Set(courseIds.map((id) => id.toString()));
     const ordersFiltered = orders.map((order) => ({
       ...order,
       items: order.items.filter((item) => courseIdSet.has(item.courseId.toString())),
-      myRevenue: order.items
-        .filter((item) => courseIdSet.has(item.courseId.toString()))
-        .reduce((sum, item) => sum + item.price, 0),
+      myRevenue: order.status === 'refunded'
+        ? 0
+        : order.items
+            .filter((item) => courseIdSet.has(item.courseId.toString()))
+            .reduce((sum, item) => sum + item.price, 0),
     }));
 
     return { orders: ordersFiltered, total, page, pages: Math.ceil(total / limit) };

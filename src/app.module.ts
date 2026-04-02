@@ -19,6 +19,8 @@ import { StatsModule } from './stats/stats.module';
 import { InstructorModule } from './instructor/instructor.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { WishlistModule } from './wishlist/wishlist.module';
+import { CouponsModule } from './coupons/coupons.module';
+import { NotesModule } from './notes/notes.module';
 
 @Module({
   imports: [
@@ -54,6 +56,8 @@ import { WishlistModule } from './wishlist/wishlist.module';
     InstructorModule,
     NotificationsModule,
     WishlistModule,
+    CouponsModule,
+    NotesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

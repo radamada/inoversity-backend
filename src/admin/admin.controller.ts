@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Patch,
   Delete,
   Body,
@@ -26,6 +27,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { AdminService } from './admin.service';
 import { CoursesService } from '../courses/courses.service';
+import { InstructorService } from '../instructor/instructor.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -116,6 +118,7 @@ export class AdminController {
   constructor(
     private readonly adminService: AdminService,
     private readonly coursesService: CoursesService,
+    private readonly instructorService: InstructorService,
   ) {}
 
   // ── Stats ──────────────────────────────────────────────────────────────────
@@ -124,6 +127,32 @@ export class AdminController {
   @ApiOperation({ summary: 'Statistici generale platformă' })
   getStats() {
     return this.adminService.getStats();
+  }
+
+  @Get('stats/monthly-revenue')
+  @ApiOperation({ summary: 'Venituri lunare platformă (ultimele 12 luni)' })
+  getMonthlyRevenue() {
+    return this.adminService.getMonthlyRevenue();
+  }
+
+  // ── Instructors ────────────────────────────────────────────────────────────
+
+  @Get('instructors')
+  @ApiOperation({ summary: 'Lista instructorilor' })
+  getInstructors() {
+    return this.adminService.getInstructors();
+  }
+
+  @Get('instructors/:id/stats')
+  @ApiOperation({ summary: 'Statistici instructor specific' })
+  getInstructorStats(@Param('id') id: string) {
+    return this.instructorService.getMyStats(id);
+  }
+
+  @Get('instructors/:id/monthly-revenue')
+  @ApiOperation({ summary: 'Venituri lunare instructor specific' })
+  getInstructorMonthlyRevenue(@Param('id') id: string) {
+    return this.instructorService.getMonthlyRevenue(id);
   }
 
   // ── Users ──────────────────────────────────────────────────────────────────
@@ -172,7 +201,10 @@ export class AdminController {
   @Post('courses')
   @ApiOperation({ summary: 'Creare curs nou' })
   createCourse(@Body() dto: CreateCourseDto, @CurrentUser() user: any) {
-    return this.coursesService.create(dto, user._id.toString());
+    // Admin poate specifica un instructor; dacă nu, cursul e atribuit adminului însuși
+    const effectiveInstructorId = dto.instructorId ?? user._id.toString();
+    const { instructorId: _removed, ...courseData } = dto;
+    return this.coursesService.create(courseData as CreateCourseDto, effectiveInstructorId);
   }
 
   @Patch('courses/:id')
@@ -183,6 +215,29 @@ export class AdminController {
   @Patch('courses/:id/publish')
   togglePublish(@Param('id') id: string) {
     return this.coursesService.togglePublish(id);
+  }
+
+  @Patch('courses/:id/publish-changes')
+  @ApiOperation({ summary: 'Publică modificările în așteptare' })
+  publishChanges(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.coursesService.publishPendingChanges(id, user._id.toString(), true);
+  }
+
+  @Delete('courses/:id/pending-changes')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Renunță la modificările în așteptare' })
+  discardChanges(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.coursesService.discardPendingChanges(id, user._id.toString(), true);
+  }
+
+  @Put('courses/:id/pending-curriculum')
+  @ApiOperation({ summary: 'Salvează curriculumul ca modificări în așteptare' })
+  savePendingCurriculum(
+    @Param('id') id: string,
+    @Body() body: { curriculum: any[] },
+    @CurrentUser() user: any,
+  ) {
+    return this.coursesService.savePendingCurriculum(id, body.curriculum, user._id.toString(), true);
   }
 
   @Delete('courses/:id')

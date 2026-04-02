@@ -8,6 +8,7 @@ import { Lesson, LessonSchema } from '../courses/schemas/lesson.schema';
 import { Enrollment, EnrollmentSchema } from '../enrollments/schemas/enrollment.schema';
 import { Order, OrderSchema } from '../orders/schemas/order.schema';
 import { CoursesModule } from '../courses/courses.module';
+import { CouponsModule } from '../coupons/coupons.module';
 
 @Module({
   imports: [
@@ -19,8 +20,10 @@ import { CoursesModule } from '../courses/courses.module';
       { name: Order.name, schema: OrderSchema },
     ]),
     CoursesModule,
+    CouponsModule,
   ],
   controllers: [InstructorController],
   providers: [InstructorService],
+  exports: [InstructorService],
 })
 export class InstructorModule {}

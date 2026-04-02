@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Patch,
   Delete,
   Body,
@@ -22,6 +23,8 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CoursesService } from '../courses/courses.service';
 import { CreateCourseDto } from '../courses/dto/create-course.dto';
+import { CouponsService } from '../coupons/coupons.service';
+import type { CreateCouponDto } from '../coupons/coupons.service';
 
 class PaginationDto {
   @IsOptional()
@@ -89,12 +92,13 @@ class CreateLessonDto {
 @ApiTags('Instructor')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('instructor', 'admin')
+@Roles('instructor')
 @Controller('instructor')
 export class InstructorController {
   constructor(
     private readonly instructorService: InstructorService,
     private readonly coursesService: CoursesService,
+    private readonly couponsService: CouponsService,
   ) {}
 
   // ── Stats ──────────────────────────────────────────────────────────────────
@@ -103,6 +107,12 @@ export class InstructorController {
   @ApiOperation({ summary: 'Statisticile mele ca instructor' })
   getStats(@CurrentUser() user: any) {
     return this.instructorService.getMyStats(user._id.toString());
+  }
+
+  @Get('stats/monthly-revenue')
+  @ApiOperation({ summary: 'Venituri lunare (ultimele 12 luni)' })
+  getMonthlyRevenue(@CurrentUser() user: any) {
+    return this.instructorService.getMonthlyRevenue(user._id.toString());
   }
 
   // ── Courses ────────────────────────────────────────────────────────────────
@@ -116,7 +126,7 @@ export class InstructorController {
   @Get('courses/:id')
   @ApiOperation({ summary: 'Un curs al meu după ID' })
   getCourse(@Param('id') id: string, @CurrentUser() user: any) {
-    return this.instructorService.getCourseById(id, user._id.toString(), user.role === 'admin');
+    return this.instructorService.getCourseById(id, user._id.toString(), false);
   }
 
   @Post('courses')
@@ -132,13 +142,36 @@ export class InstructorController {
     @Body() dto: Partial<CreateCourseDto>,
     @CurrentUser() user: any,
   ) {
-    return this.coursesService.update(id, dto, user._id.toString(), user.role === 'admin');
+    return this.coursesService.update(id, dto, user._id.toString(), false);
   }
 
   @Patch('courses/:id/publish')
   @ApiOperation({ summary: 'Toggle publicare curs' })
   togglePublish(@Param('id') id: string, @CurrentUser() user: any) {
-    return this.instructorService.togglePublish(id, user._id.toString(), user.role === 'admin');
+    return this.instructorService.togglePublish(id, user._id.toString(), false);
+  }
+
+  @Patch('courses/:id/publish-changes')
+  @ApiOperation({ summary: 'Publică modificările în așteptare' })
+  publishChanges(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.coursesService.publishPendingChanges(id, user._id.toString(), false);
+  }
+
+  @Delete('courses/:id/pending-changes')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Renunță la modificările în așteptare' })
+  discardChanges(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.coursesService.discardPendingChanges(id, user._id.toString(), false);
+  }
+
+  @Put('courses/:id/pending-curriculum')
+  @ApiOperation({ summary: 'Salvează curriculumul ca modificări în așteptare' })
+  savePendingCurriculum(
+    @Param('id') id: string,
+    @Body() body: { curriculum: any[] },
+    @CurrentUser() user: any,
+  ) {
+    return this.coursesService.savePendingCurriculum(id, body.curriculum, user._id.toString(), false);
   }
 
   // ── Orders ────────────────────────────────────────────────────────────────
@@ -157,7 +190,7 @@ export class InstructorController {
     @Body() dto: CreateSectionDto,
     @CurrentUser() user: any,
   ) {
-    return this.instructorService.createSection(courseId, dto.title, user._id.toString(), user.role === 'admin');
+    return this.instructorService.createSection(courseId, dto.title, user._id.toString(), false);
   }
 
   @Patch('sections/:id')
@@ -166,13 +199,13 @@ export class InstructorController {
     @Body() dto: UpdateSectionDto,
     @CurrentUser() user: any,
   ) {
-    return this.instructorService.updateSection(id, dto, user._id.toString(), user.role === 'admin');
+    return this.instructorService.updateSection(id, dto, user._id.toString(), false);
   }
 
   @Delete('sections/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   deleteSection(@Param('id') id: string, @CurrentUser() user: any) {
-    return this.instructorService.deleteSection(id, user._id.toString(), user.role === 'admin');
+    return this.instructorService.deleteSection(id, user._id.toString(), false);
   }
 
   // ── Lessons ───────────────────────────────────────────────────────────────
@@ -184,7 +217,7 @@ export class InstructorController {
     @Body() dto: CreateLessonDto,
     @CurrentUser() user: any,
   ) {
-    return this.instructorService.createLesson(sectionId, courseId, dto, user._id.toString(), user.role === 'admin');
+    return this.instructorService.createLesson(sectionId, courseId, dto, user._id.toString(), false);
   }
 
   @Patch('lessons/:id')
@@ -193,12 +226,48 @@ export class InstructorController {
     @Body() dto: Partial<CreateLessonDto>,
     @CurrentUser() user: any,
   ) {
-    return this.instructorService.updateLesson(id, dto, user._id.toString(), user.role === 'admin');
+    return this.instructorService.updateLesson(id, dto, user._id.toString(), false);
   }
 
   @Delete('lessons/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   deleteLesson(@Param('id') id: string, @CurrentUser() user: any) {
-    return this.instructorService.deleteLesson(id, user._id.toString(), user.role === 'admin');
+    return this.instructorService.deleteLesson(id, user._id.toString(), false);
+  }
+
+  // ── Coupons ───────────────────────────────────────────────────────────────
+
+  @Get('coupons')
+  @ApiOperation({ summary: 'Cupoanele mele' })
+  getMyCoupons(@CurrentUser() user: any) {
+    // Admin sees all; instructor sees only own
+    if (false) {
+      return this.couponsService.findAll();
+    }
+    return this.couponsService.findByInstructor(user._id.toString());
+  }
+
+  @Post('coupons')
+  @ApiOperation({ summary: 'Creează cupon (custom sau random)' })
+  @HttpCode(HttpStatus.CREATED)
+  createCoupon(@Body() dto: CreateCouponDto, @CurrentUser() user: any) {
+    return this.couponsService.createForInstructor(dto, user._id.toString());
+  }
+
+  @Patch('coupons/:id')
+  @ApiOperation({ summary: 'Actualizează cupon propriu' })
+  updateCoupon(
+    @Param('id') id: string,
+    @Body() dto: Partial<CreateCouponDto>,
+    @CurrentUser() user: any,
+  ) {
+    return this.couponsService.updateForInstructor(id, dto, user._id.toString(), false);
+  }
+
+  @Delete('coupons/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Șterge cupon propriu' })
+  removeCoupon(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.couponsService.removeForInstructor(id, user._id.toString(), false);
   }
 }
