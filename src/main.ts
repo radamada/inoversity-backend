@@ -5,9 +5,13 @@ import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+import { AppLogger } from './common/logger/app.logger';
+import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const logger = new AppLogger();
+  const app = await NestFactory.create(AppModule, { logger });
+  app.useGlobalInterceptors(new LoggingInterceptor());
   const config = app.get(ConfigService);
 
   // Security
@@ -26,7 +30,7 @@ async function bootstrap() {
       }
     },
     credentials: true,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
@@ -54,11 +58,11 @@ async function bootstrap() {
       .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup('api/docs', app, document);
-    console.log(`📚 Swagger docs at http://localhost:${config.get<number>('BACKEND_PORT', 3001)}/api/docs`);
+    logger.log(`Swagger docs at http://localhost:${config.get<number>('BACKEND_PORT', 3001)}/api/docs`, 'Bootstrap');
   }
 
   const port = config.get<number>('BACKEND_PORT', 3001);
   await app.listen(port);
-  console.log(`🚀 EduInovatrium API running on http://localhost:${port}/api`);
+  logger.log(`EduInovatrium API running on http://localhost:${port}/api`, 'Bootstrap');
 }
 bootstrap();

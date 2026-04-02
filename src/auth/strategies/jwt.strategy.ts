@@ -13,13 +13,14 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: config.get<string>('JWT_ACCESS_SECRET') ?? 'default_secret',
+      secretOrKey: config.get<string>('JWT_ACCESS_SECRET') ?? (() => { throw new Error('JWT_ACCESS_SECRET env var is not set'); })(),
     } as any);
   }
 
   async validate(payload: { sub: string; email: string; role: string }) {
     const user = await this.usersService.findById(payload.sub);
-    if (!user || !user.isActive) throw new UnauthorizedException();
+    if (!user) throw new UnauthorizedException();
+    if (!user.isActive) throw new UnauthorizedException('ACCOUNT_BLOCKED');
     return user;
   }
 }

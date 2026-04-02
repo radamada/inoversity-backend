@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -10,6 +11,10 @@ import { Course, CourseDocument } from './schemas/course.schema';
 import { Section, SectionDocument } from './schemas/section.schema';
 import { Lesson, LessonDocument } from './schemas/lesson.schema';
 import { Wishlist, WishlistDocument } from '../wishlist/schemas/wishlist.schema';
+import { Enrollment, EnrollmentDocument } from '../enrollments/schemas/enrollment.schema';
+import { Review, ReviewDocument } from '../reviews/schemas/review.schema';
+import { Cart, CartDocument } from '../cart/schemas/cart.schema';
+import { Order, OrderDocument } from '../orders/schemas/order.schema';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { CourseQueryDto } from './dto/course-query.dto';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -21,6 +26,10 @@ export class CoursesService {
     @InjectModel(Section.name) private sectionModel: Model<SectionDocument>,
     @InjectModel(Lesson.name) private lessonModel: Model<LessonDocument>,
     @InjectModel(Wishlist.name) private wishlistModel: Model<WishlistDocument>,
+    @InjectModel(Enrollment.name) private enrollmentModel: Model<EnrollmentDocument>,
+    @InjectModel(Review.name) private reviewModel: Model<ReviewDocument>,
+    @InjectModel(Cart.name) private cartModel: Model<CartDocument>,
+    @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     private notificationsService: NotificationsService,
   ) {}
 
@@ -32,14 +41,23 @@ export class CoursesService {
     if (onlyPublished) filter.published = true;
 
     if (query.search) {
-      filter.$text = { $search: query.search };
+      const pattern = buildDiacriticPattern(query.search);
+      filter.$or = [
+        { title: { $regex: pattern, $options: 'i' } },
+        { description: { $regex: pattern, $options: 'i' } },
+        { tags: { $regex: pattern, $options: 'i' } },
+      ];
     }
+    if (query.instructorId) filter.instructorId = new Types.ObjectId(query.instructorId);
     if (query.category) filter.categoryId = new Types.ObjectId(query.category);
     if (query.level) filter.level = query.level;
     if (query.minPrice !== undefined || query.maxPrice !== undefined) {
       filter.price = {};
       if (query.minPrice !== undefined) filter.price.$gte = query.minPrice;
       if (query.maxPrice !== undefined) filter.price.$lte = query.maxPrice;
+    }
+    if (query.minRating !== undefined) {
+      filter.rating = { $gte: query.minRating };
     }
 
     let sort: any = { createdAt: -1 };
@@ -99,24 +117,106 @@ export class CoursesService {
   }
 
   async update(id: string, dto: Partial<CreateCourseDto>, userId: string, isAdmin = false): Promise<CourseDocument> {
-    if (!isAdmin) {
-      const existing = await this.courseModel.findById(id).select('instructorId').lean();
-      if (!existing) throw new NotFoundException('Cursul nu a fost găsit');
-      if (existing.instructorId.toString() !== userId) {
-        throw new ForbiddenException('Nu ai permisiunea de a modifica acest curs');
-      }
+    const existing = await this.courseModel.findById(id).select('instructorId published').lean();
+    if (!existing) throw new NotFoundException('Cursul nu a fost găsit');
+
+    if (!isAdmin && existing.instructorId.toString() !== userId) {
+      throw new ForbiddenException('Nu ai permisiunea de a modifica acest curs');
     }
-    const $set: Record<string, any> = { ...dto };
-    if ($set.categoryId) $set.categoryId = new Types.ObjectId($set.categoryId);
-    else delete $set.categoryId;
+
+    const changes: Record<string, any> = { ...dto };
+    if (changes.categoryId) changes.categoryId = new Types.ObjectId(changes.categoryId);
+    else delete changes.categoryId;
+
+    // If the course is published, merge changes into pendingChanges (preserve existing curriculum draft)
+    if (existing.published) {
+      const existingDoc = await this.courseModel.findById(id).select('pendingChanges').lean();
+      const existingPending = (existingDoc?.pendingChanges as Record<string, any>) ?? {};
+      const updated = await this.courseModel
+        .findByIdAndUpdate(id, { $set: { pendingChanges: { ...existingPending, ...changes } } }, { new: true })
+        .populate('instructorId', 'name avatar')
+        .populate('categoryId', 'name slug')
+        .exec();
+      if (!updated) throw new NotFoundException('Cursul nu a fost găsit');
+      return updated;
+    }
+
+    // Draft course → apply directly
     const updated = await this.courseModel
-      .findByIdAndUpdate(id, { $set }, { new: true })
+      .findByIdAndUpdate(id, { $set: changes }, { new: true })
+      .populate('instructorId', 'name avatar')
+      .populate('categoryId', 'name slug')
+      .exec();
+    if (!updated) throw new NotFoundException('Cursul nu a fost găsit');
+    return updated;
+  }
+
+  async savePendingCurriculum(
+    id: string,
+    curriculum: Array<{
+      sectionId: string | null;
+      title: string;
+      lessons: Array<{
+        lessonId: string | null;
+        title: string;
+        cdnVideoId: string;
+        duration: number;
+        isFree: boolean;
+      }>;
+    }>,
+    userId: string,
+    isAdmin = false,
+  ): Promise<CourseDocument> {
+    const existing = await this.courseModel.findById(id).select('instructorId published pendingChanges').lean();
+    if (!existing) throw new NotFoundException('Cursul nu a fost găsit');
+    if (!isAdmin && existing.instructorId.toString() !== userId) {
+      throw new ForbiddenException('Nu ai permisiunea de a modifica acest curs');
+    }
+    if (!existing.published) {
+      throw new BadRequestException('Acest endpoint este doar pentru cursuri publicate');
+    }
+    const existingPending = (existing.pendingChanges as Record<string, any>) ?? {};
+    const updated = await this.courseModel
+      .findByIdAndUpdate(
+        id,
+        { $set: { pendingChanges: { ...existingPending, curriculum } } },
+        { new: true },
+      )
+      .populate('instructorId', 'name avatar')
+      .populate('categoryId', 'name slug')
+      .exec();
+    if (!updated) throw new NotFoundException('Cursul nu a fost găsit');
+    return updated;
+  }
+
+  async publishPendingChanges(id: string, userId: string, isAdmin = false): Promise<CourseDocument> {
+    const course = await this.courseModel.findById(id).select('instructorId pendingChanges title').lean();
+    if (!course) throw new NotFoundException('Cursul nu a fost găsit');
+    if (!isAdmin && course.instructorId.toString() !== userId) {
+      throw new ForbiddenException('Nu ai permisiunea de a modifica acest curs');
+    }
+    if (!course.pendingChanges) throw new BadRequestException('Nu există modificări în așteptare');
+
+    const { curriculum, ...courseFields } = course.pendingChanges as Record<string, any>;
+
+    // Apply curriculum changes if present
+    if (curriculum && Array.isArray(curriculum)) {
+      await this.applyCurriculumChanges(id, curriculum);
+    }
+
+    // Apply course metadata fields (exclude curriculum key)
+    const updated = await this.courseModel
+      .findByIdAndUpdate(
+        id,
+        { $set: courseFields, $unset: { pendingChanges: '' } },
+        { new: true },
+      )
       .populate('instructorId', 'name avatar')
       .populate('categoryId', 'name slug')
       .exec();
     if (!updated) throw new NotFoundException('Cursul nu a fost găsit');
 
-    // Notify enrolled users about the update
+    // Notify enrolled users only after the new version is live
     await this.notificationsService.notifyEnrolledUsers(
       id,
       'course_updated',
@@ -124,6 +224,101 @@ export class CoursesService {
       `Instructorul a adus modificări cursului "${updated.title}". Intră să vezi ce s-a schimbat!`,
     );
 
+    return updated;
+  }
+
+  private async applyCurriculumChanges(
+    courseId: string,
+    pendingSections: Array<{
+      sectionId: string | null;
+      title: string;
+      lessons: Array<{
+        lessonId: string | null;
+        title: string;
+        cdnVideoId: string;
+        duration: number;
+        isFree: boolean;
+      }>;
+    }>,
+  ): Promise<void> {
+    const cid = new Types.ObjectId(courseId);
+
+    // Find existing section IDs for this course
+    const existingSections = await this.sectionModel.find({ courseId: cid }).select('_id').lean();
+    const existingSectionIds = existingSections.map((s) => s._id.toString());
+    const pendingSectionIds = pendingSections.filter((s) => s.sectionId).map((s) => s.sectionId!);
+
+    // Delete sections removed from the pending curriculum
+    const sectionsToDelete = existingSectionIds.filter((sid) => !pendingSectionIds.includes(sid));
+    if (sectionsToDelete.length) {
+      await this.lessonModel.deleteMany({ sectionId: { $in: sectionsToDelete.map((sid) => new Types.ObjectId(sid)) } });
+      await this.sectionModel.deleteMany({ _id: { $in: sectionsToDelete.map((sid) => new Types.ObjectId(sid)) } });
+    }
+
+    // Create / update sections in order
+    for (let i = 0; i < pendingSections.length; i++) {
+      const ps = pendingSections[i];
+      let sectionDbId: string;
+
+      if (ps.sectionId) {
+        await this.sectionModel.findByIdAndUpdate(ps.sectionId, { title: ps.title, order: i });
+        sectionDbId = ps.sectionId;
+      } else {
+        const newSection = new this.sectionModel({ courseId: cid, title: ps.title, order: i });
+        await newSection.save();
+        sectionDbId = (newSection._id as Types.ObjectId).toString();
+      }
+
+      // Sync lessons for this section
+      const existingLessons = await this.lessonModel
+        .find({ sectionId: new Types.ObjectId(sectionDbId) })
+        .select('_id')
+        .lean();
+      const existingLessonIds = existingLessons.map((l) => l._id.toString());
+      const pendingLessonIds = ps.lessons.filter((l) => l.lessonId).map((l) => l.lessonId!);
+
+      const lessonsToDelete = existingLessonIds.filter((lid) => !pendingLessonIds.includes(lid));
+      if (lessonsToDelete.length) {
+        await this.lessonModel.deleteMany({ _id: { $in: lessonsToDelete.map((lid) => new Types.ObjectId(lid)) } });
+      }
+
+      for (let j = 0; j < ps.lessons.length; j++) {
+        const pl = ps.lessons[j];
+        if (pl.lessonId) {
+          await this.lessonModel.findByIdAndUpdate(pl.lessonId, {
+            title: pl.title,
+            cdnVideoId: pl.cdnVideoId,
+            duration: pl.duration,
+            isFree: pl.isFree,
+            order: j,
+          });
+        } else {
+          await new this.lessonModel({
+            courseId: cid,
+            sectionId: new Types.ObjectId(sectionDbId),
+            title: pl.title,
+            cdnVideoId: pl.cdnVideoId,
+            duration: pl.duration,
+            isFree: pl.isFree,
+            order: j,
+          }).save();
+        }
+      }
+    }
+  }
+
+  async discardPendingChanges(id: string, userId: string, isAdmin = false): Promise<CourseDocument> {
+    const course = await this.courseModel.findById(id).select('instructorId').lean();
+    if (!course) throw new NotFoundException('Cursul nu a fost găsit');
+    if (!isAdmin && course.instructorId.toString() !== userId) {
+      throw new ForbiddenException('Nu ai permisiunea de a modifica acest curs');
+    }
+    const updated = await this.courseModel
+      .findByIdAndUpdate(id, { $unset: { pendingChanges: '' } }, { new: true })
+      .populate('instructorId', 'name avatar')
+      .populate('categoryId', 'name slug')
+      .exec();
+    if (!updated) throw new NotFoundException('Cursul nu a fost găsit');
     return updated;
   }
 
@@ -140,12 +335,68 @@ export class CoursesService {
     return saved;
   }
 
+  async getAlsoBought(courseId: string, limit = 4): Promise<CourseDocument[]> {
+    const objId = new Types.ObjectId(courseId);
+
+    const result = await this.orderModel.aggregate([
+      { $match: { status: 'paid', 'items.courseId': objId } },
+      { $unwind: '$items' },
+      { $match: { 'items.courseId': { $ne: objId } } },
+      { $group: { _id: '$items.courseId', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: limit },
+    ]);
+
+    const ids = result.map((r) => r._id);
+    if (!ids.length) return [];
+
+    return this.courseModel
+      .find({ _id: { $in: ids }, published: true })
+      .select('title slug thumbnail price rating reviewCount instructorId')
+      .populate('instructorId', 'name')
+      .lean() as any;
+  }
+
   async delete(id: string): Promise<void> {
-    const course = await this.findById(id);
-    await this.cleanWishlistAndNotify(course._id.toString(), course.title);
-    await this.sectionModel.deleteMany({ courseId: course._id });
-    await this.lessonModel.deleteMany({ courseId: course._id });
-    await course.deleteOne();
+    const course = await this.courseModel
+      .findById(id)
+      .select('_id title instructorId')
+      .lean();
+    if (!course) throw new NotFoundException('Cursul nu a fost găsit');
+
+    const courseId = course._id;
+
+    // Faza 1: notificări (înainte de ștergere, avem nevoie de datele existente)
+    await Promise.all([
+      this.cleanWishlistAndNotify(courseId.toString(), course.title),
+      this.notificationsService.notifyEnrolledUsers(
+        courseId.toString(),
+        'course_deleted',
+        'Curs indisponibil',
+        `Cursul „${course.title}" la care ești înscris nu mai este disponibil pe platformă.`,
+      ),
+    ]);
+
+    // Faza 2: ștergere bulk din toate colecțiile
+    await Promise.all([
+      this.enrollmentModel.deleteMany({ courseId }),
+      this.reviewModel.deleteMany({ courseId }),
+      this.cartModel.updateMany({ items: courseId }, { $pull: { items: courseId } }),
+      this.sectionModel.deleteMany({ courseId }),
+      this.lessonModel.deleteMany({ courseId }),
+    ]);
+
+    // Notifică instructorul că cursul lui a fost șters
+    if (course.instructorId) {
+      await this.notificationsService.create(
+        course.instructorId.toString(),
+        'course_deleted',
+        'Cursul tău a fost șters',
+        `Cursul „${course.title}" a fost eliminat de pe platformă de un administrator.`,
+      );
+    }
+
+    await this.courseModel.findByIdAndDelete(courseId);
   }
 
   private async cleanWishlistAndNotify(courseId: string, courseTitle: string): Promise<void> {
@@ -279,4 +530,22 @@ export class CoursesService {
     }
     return slug;
   }
+}
+
+/** Builds a regex pattern that matches a query regardless of Romanian diacritics.
+ *  e.g. "incep" matches "Începător", "s" matches "ș" etc. */
+function buildDiacriticPattern(query: string): string {
+  const map: Record<string, string> = {
+    a: '[aăâ]', ă: '[aăâ]', â: '[aăâ]',
+    i: '[iî]',  î: '[iî]',
+    s: '[sșş]', ș: '[sșş]', ş: '[sșş]',
+    t: '[tțţ]', ț: '[tțţ]', ţ: '[tțţ]',
+  };
+  return query
+    .split('')
+    .map((c) => {
+      if (/[.*+?^${}()|[\]\\]/.test(c)) return '\\' + c; // escape regex chars
+      return map[c.toLowerCase()] ?? c;
+    })
+    .join('');
 }

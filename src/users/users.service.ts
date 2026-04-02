@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -11,6 +12,7 @@ import { User, UserDocument } from './schemas/user.schema';
 import { Course, CourseDocument } from '../courses/schemas/course.schema';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Injectable()
 export class UsersService {
@@ -52,6 +54,16 @@ export class UsersService {
     return user;
   }
 
+  async changePassword(id: string, dto: ChangePasswordDto): Promise<{ message: string }> {
+    const user = await this.userModel.findById(id).select('+passwordHash').exec();
+    if (!user) throw new NotFoundException('Utilizatorul nu a fost găsit');
+    const valid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!valid) throw new UnauthorizedException('Parola curentă este incorectă');
+    user.passwordHash = await bcrypt.hash(dto.newPassword, 12);
+    await user.save();
+    return { message: 'Parola a fost schimbată cu succes' };
+  }
+
   async setPasswordResetToken(email: string, token: string, expires: Date): Promise<void> {
     await this.userModel.findOneAndUpdate(
       { email: email.toLowerCase() },
@@ -86,6 +98,17 @@ export class UsersService {
       .exec();
     if (!user) throw new NotFoundException('Utilizatorul nu a fost găsit');
     return user;
+  }
+
+  async listPublicInstructors(): Promise<{ _id: string; name: string; avatar: string }[]> {
+    // Only instructors (not admins) who have at least one published course
+    const instructorIds = await this.courseModel.distinct('instructorId', { published: true });
+    return this.userModel
+      .find({ _id: { $in: instructorIds }, role: 'instructor', isActive: true })
+      .select('name avatar')
+      .sort({ name: 1 })
+      .lean()
+      .exec() as any;
   }
 
   async getPublicInstructorProfile(id: string) {

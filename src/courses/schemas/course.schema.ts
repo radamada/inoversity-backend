@@ -52,6 +52,10 @@ export class Course {
 
   @Prop({ default: 'ro' })
   language: string;
+
+  /** Holds unpublished edits for a live course. null = no pending changes. */
+  @Prop({ type: Object, default: null })
+  pendingChanges: Record<string, any> | null;
 }
 
 export const CourseSchema = SchemaFactory.createForClass(Course);

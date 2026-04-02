@@ -9,6 +9,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
@@ -31,6 +32,7 @@ export class PaymentsController {
 
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
+  @SkipThrottle()
   @ApiOperation({ summary: 'Stripe webhook – confirmare plată' })
   async handleWebhook(
     @Req() req: Request,

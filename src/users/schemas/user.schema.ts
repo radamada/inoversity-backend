@@ -43,6 +43,9 @@ export class User {
 
   @Prop({ type: Date, default: null })
   termsAcceptedAt: Date | null;
+
+  @Prop({ default: false })
+  darkMode: boolean;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

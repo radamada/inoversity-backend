@@ -40,6 +40,12 @@ export class Order {
 
   @Prop({ type: String, default: null })
   stripeClientSecret: string | null;
+
+  @Prop({ type: String, default: null })
+  couponCode: string | null;
+
+  @Prop({ type: Number, default: 0 })
+  discountAmount: number;
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);

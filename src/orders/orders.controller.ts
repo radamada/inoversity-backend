@@ -3,11 +3,14 @@ import {
   Get,
   Post,
   Param,
+  Body,
   UseGuards,
   HttpCode,
   HttpStatus,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -23,16 +26,26 @@ export class OrdersController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  createOrder(@CurrentUser() user: any) {
-    return this.ordersService.createOrder(user._id.toString());
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
+  createOrder(
+    @CurrentUser() user: any,
+    @Body('couponCode') couponCode?: string,
+  ) {
+    return this.ordersService.createOrder(user._id.toString(), couponCode);
   }
 
   @Post('fake-pay')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(RolesGuard)
   @Roles('admin')
-  fakePay(@CurrentUser() user: any) {
-    return this.ordersService.createAndPayFake(user._id.toString());
+  fakePay(
+    @CurrentUser() user: any,
+    @Body('couponCode') couponCode?: string,
+  ) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException('Endpoint indisponibil în producție');
+    }
+    return this.ordersService.createAndPayFake(user._id.toString(), couponCode);
   }
 
   @Get()

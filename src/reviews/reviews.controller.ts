@@ -11,6 +11,7 @@ import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { Throttle } from '@nestjs/throttler';
 import { ReviewsService } from './reviews.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -42,6 +43,7 @@ export class ReviewsController {
   @Post(':courseId')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   create(
     @Param('courseId') courseId: string,
     @CurrentUser() user: any,

@@ -2,6 +2,7 @@ import { Controller, Get, Patch, Body, Param, UseGuards, Request } from '@nestjs
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
@@ -10,7 +11,12 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  // ── Public endpoint — no auth required ──────────────────────────────────
+  // ── Public endpoints — no auth required ─────────────────────────────────
+  @Get('instructors')
+  listInstructors() {
+    return this.usersService.listPublicInstructors();
+  }
+
   @Get('instructors/:id')
   getInstructorProfile(@Param('id') id: string) {
     return this.usersService.getPublicInstructorProfile(id);
@@ -29,5 +35,12 @@ export class UsersController {
   @Patch('me')
   async updateProfile(@CurrentUser() user: any, @Body() dto: UpdateUserDto) {
     return this.usersService.updateProfile(user._id, dto);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Patch('me/password')
+  async changePassword(@CurrentUser() user: any, @Body() dto: ChangePasswordDto) {
+    return this.usersService.changePassword(user._id, dto);
   }
 }

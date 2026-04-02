@@ -41,14 +41,9 @@ export class NotificationsService {
 
     if (!enrollments.length) return;
 
-    await this.notificationModel.insertMany(
-      enrollments.map((e) => ({
-        userId: e.userId,
-        type,
-        title,
-        message,
-        courseId: new Types.ObjectId(courseId),
-      })),
+    const cid = new Types.ObjectId(courseId);
+    await this.insertInChunks(
+      enrollments.map((e) => ({ userId: e.userId, type, title, message, courseId: cid })),
     );
   }
 
@@ -60,15 +55,16 @@ export class NotificationsService {
     courseId?: string,
   ): Promise<void> {
     if (!userIds.length) return;
-    await this.notificationModel.insertMany(
-      userIds.map((userId) => ({
-        userId,
-        type,
-        title,
-        message,
-        courseId: courseId ? new Types.ObjectId(courseId) : null,
-      })),
+    const cid = courseId ? new Types.ObjectId(courseId) : null;
+    await this.insertInChunks(
+      userIds.map((userId) => ({ userId, type, title, message, courseId: cid })),
     );
+  }
+
+  private async insertInChunks(docs: object[], chunkSize = 500): Promise<void> {
+    for (let i = 0; i < docs.length; i += chunkSize) {
+      await this.notificationModel.insertMany(docs.slice(i, i + chunkSize));
+    }
   }
 
   async getForUser(userId: string, limit = 20) {

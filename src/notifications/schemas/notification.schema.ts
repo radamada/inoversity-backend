@@ -3,7 +3,7 @@ import { Document, Types } from 'mongoose';
 
 export type NotificationDocument = Notification & Document;
 
-export type NotificationType = 'purchase' | 'refund' | 'course_updated' | 'wishlist_removed';
+export type NotificationType = 'purchase' | 'refund' | 'course_updated' | 'wishlist_removed' | 'course_deleted';
 
 @Schema({ timestamps: true })
 export class Notification {

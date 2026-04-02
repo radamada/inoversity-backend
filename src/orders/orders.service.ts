@@ -12,6 +12,7 @@ import { CoursesService } from '../courses/courses.service';
 import { CartService } from '../cart/cart.service';
 import { EnrollmentsService } from '../enrollments/enrollments.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { CouponsService } from '../coupons/coupons.service';
 
 @Injectable()
 export class OrdersService {
@@ -23,6 +24,7 @@ export class OrdersService {
     private cartService: CartService,
     private enrollmentsService: EnrollmentsService,
     private notificationsService: NotificationsService,
+    private couponsService: CouponsService,
     private config: ConfigService,
   ) {
     this.stripe = new Stripe(this.config.get<string>('STRIPE_SECRET_KEY') ?? '', {
@@ -30,23 +32,39 @@ export class OrdersService {
     });
   }
 
-  async createOrder(userId: string) {
+  async createOrder(userId: string, couponCode?: string) {
     const cartItems = await this.cartService.getCartItems(userId);
     if (!cartItems.length) throw new BadRequestException('Coșul este gol');
 
     // Fetch course details for price snapshot
-    const items = await Promise.all(
-      cartItems.map(async (id) => {
-        const course = await this.coursesService.findById(id.toString());
-        return {
-          courseId: course._id as Types.ObjectId,
-          title: course.title,
-          price: course.price,
-        };
-      }),
+    const courses = await Promise.all(
+      cartItems.map((id) => this.coursesService.findById(id.toString())),
     );
+    const items = courses.map((course) => ({
+      courseId: course._id as Types.ObjectId,
+      title: course.title,
+      price: course.price,
+    }));
 
-    const total = items.reduce((sum, i) => sum + i.price, 0);
+    const subtotal = items.reduce((sum, i) => sum + i.price, 0);
+
+    // Apply coupon server-side — never trust the frontend's discount value
+    let discountAmount = 0;
+    let appliedCouponCode: string | null = null;
+    if (couponCode && couponCode.trim()) {
+      const instructorIds = courses.map((c) => c.instructorId?.toString()).filter(Boolean) as string[];
+      const instructorSubtotals: Record<string, number> = {};
+      const coursePrices: Record<string, number> = {};
+      for (const course of courses) {
+        const instId = (course.instructorId as any)?._id?.toString() ?? course.instructorId?.toString();
+        if (instId) instructorSubtotals[instId] = (instructorSubtotals[instId] ?? 0) + course.price;
+        coursePrices[course._id.toString()] = course.price;
+      }
+      discountAmount = await this.couponsService.applyCoupon(couponCode, subtotal, instructorIds, instructorSubtotals, coursePrices, userId);
+      appliedCouponCode = couponCode.trim().toUpperCase();
+    }
+
+    const total = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
 
     // Create Stripe PaymentIntent
     const paymentIntent = await this.stripe.paymentIntents.create({
@@ -60,6 +78,8 @@ export class OrdersService {
       userId: new Types.ObjectId(userId),
       items,
       total,
+      discountAmount: Math.round(discountAmount * 100) / 100,
+      couponCode: appliedCouponCode,
       stripePaymentIntentId: paymentIntent.id,
       stripeClientSecret: paymentIntent.client_secret,
     });
@@ -69,6 +89,8 @@ export class OrdersService {
       orderId: order._id,
       clientSecret: paymentIntent.client_secret,
       total,
+      discountAmount: Math.round(discountAmount * 100) / 100,
+      subtotal,
     };
   }
 
@@ -166,27 +188,44 @@ export class OrdersService {
     return (await this.orderModel.findById(orderId))!;
   }
 
-  async createAndPayFake(userId: string) {
+  async createAndPayFake(userId: string, couponCode?: string) {
     const cartItems = await this.cartService.getCartItems(userId);
     if (!cartItems.length) throw new BadRequestException('Coșul este gol');
 
-    const items = await Promise.all(
-      cartItems.map(async (id) => {
-        const course = await this.coursesService.findById(id.toString());
-        return {
-          courseId: course._id as Types.ObjectId,
-          title: course.title,
-          price: course.price,
-        };
-      }),
+    const courses = await Promise.all(
+      cartItems.map((id) => this.coursesService.findById(id.toString())),
     );
+    const items = courses.map((course) => ({
+      courseId: course._id as Types.ObjectId,
+      title: course.title,
+      price: course.price,
+    }));
 
-    const total = items.reduce((sum, i) => sum + i.price, 0);
+    const subtotal = items.reduce((sum, i) => sum + i.price, 0);
+
+    let discountAmount = 0;
+    let appliedCouponCode: string | null = null;
+    if (couponCode && couponCode.trim()) {
+      const instructorIds = courses.map((c) => c.instructorId?.toString()).filter(Boolean) as string[];
+      const instructorSubtotals: Record<string, number> = {};
+      const coursePrices: Record<string, number> = {};
+      for (const course of courses) {
+        const instId = (course.instructorId as any)?._id?.toString() ?? course.instructorId?.toString();
+        if (instId) instructorSubtotals[instId] = (instructorSubtotals[instId] ?? 0) + course.price;
+        coursePrices[course._id.toString()] = course.price;
+      }
+      discountAmount = await this.couponsService.applyCoupon(couponCode, subtotal, instructorIds, instructorSubtotals, coursePrices, userId);
+      appliedCouponCode = couponCode.trim().toUpperCase();
+    }
+
+    const total = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
 
     const order = new this.orderModel({
       userId: new Types.ObjectId(userId),
       items,
       total,
+      discountAmount: Math.round(discountAmount * 100) / 100,
+      couponCode: appliedCouponCode,
       status: 'paid',
     });
     await order.save();
@@ -210,7 +249,36 @@ export class OrdersService {
 
     await this.cartService.clearCart(userId);
 
-    return { orderId: order._id, total };
+    return { orderId: order._id, total, discountAmount: Math.round(discountAmount * 100) / 100, subtotal };
+  }
+
+  async getMonthlyRevenue(): Promise<{ month: string; revenue: number }[]> {
+    const raw = await this.orderModel.aggregate([
+      { $match: { status: 'paid' } },
+      {
+        $group: {
+          _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
+          revenue: { $sum: '$total' },
+        },
+      },
+      { $sort: { '_id.year': 1, '_id.month': 1 } },
+    ]);
+
+    const map = new Map<string, number>(
+      raw.map((r) => [
+        `${r._id.year}-${String(r._id.month).padStart(2, '0')}`,
+        Math.round(r.revenue * 100) / 100,
+      ]),
+    );
+
+    const months: { month: string; revenue: number }[] = [];
+    const now = new Date();
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      months.push({ month: key, revenue: map.get(key) ?? 0 });
+    }
+    return months;
   }
 
   async getStats() {

@@ -11,6 +11,11 @@ export class CourseQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  instructorId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
   category?: string;
 
   @ApiPropertyOptional()
@@ -30,6 +35,14 @@ export class CourseQueryDto {
   @Type(() => Number)
   @IsNumber()
   maxPrice?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(5)
+  minRating?: number;
 
   @ApiPropertyOptional()
   @IsOptional()

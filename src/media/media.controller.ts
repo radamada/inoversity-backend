@@ -17,6 +17,7 @@ import { extname } from 'path';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { MediaService } from './media.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -39,6 +40,7 @@ export class MediaController {
   @Post('upload-video')
   @UseGuards(RolesGuard)
   @Roles('admin', 'instructor')
+  @Throttle({ default: { ttl: 60000, limit: 20 } })
   @UseInterceptors(FileInterceptor('file', {
     storage: diskStorage({
       destination: '/tmp',
@@ -58,6 +60,7 @@ export class MediaController {
   @Post('upload-url')
   @UseGuards(RolesGuard)
   @Roles('admin', 'instructor')
+  @Throttle({ default: { ttl: 60000, limit: 20 } })
   @ApiOperation({ summary: 'Obține URL upload direct Bunny.net' })
   getUploadUrl(@Body() dto: UploadUrlDto) {
     return this.mediaService.getUploadUrl(dto.title);
@@ -66,6 +69,7 @@ export class MediaController {
   @Post('upload-image')
   @UseGuards(RolesGuard)
   @Roles('admin', 'instructor')
+  @Throttle({ default: { ttl: 60000, limit: 20 } })
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
   @ApiOperation({ summary: 'Upload thumbnail imagine la Bunny.net Storage' })
   async uploadImage(@UploadedFile() file: Express.Multer.File) {

@@ -66,4 +66,9 @@ export class CreateCourseDto {
   @IsOptional()
   @IsString()
   language?: string;
+
+  @ApiPropertyOptional({ description: 'Admin only: override instructor (MongoDB ObjectId)' })
+  @IsOptional()
+  @IsString()
+  instructorId?: string;
 }

@@ -7,6 +7,7 @@ import { CoursesModule } from '../courses/courses.module';
 import { CartModule } from '../cart/cart.module';
 import { EnrollmentsModule } from '../enrollments/enrollments.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { CouponsModule } from '../coupons/coupons.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     forwardRef(() => CartModule),
     EnrollmentsModule,
     NotificationsModule,
+    CouponsModule,
   ],
   providers: [OrdersService],
   controllers: [OrdersController],

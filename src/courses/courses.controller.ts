@@ -43,6 +43,12 @@ export class CoursesController {
     return this.coursesService.getCurriculum(id);
   }
 
+  @Get(':id/also-bought')
+  @ApiOperation({ summary: 'Cursuri cumpărate frecvent împreună' })
+  getAlsoBought(@Param('id') id: string) {
+    return this.coursesService.getAlsoBought(id);
+  }
+
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('instructor', 'admin')
