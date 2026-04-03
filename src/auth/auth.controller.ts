@@ -9,6 +9,8 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  UnauthorizedException,
+  Redirect,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -54,6 +56,23 @@ export class AuthController {
     return { accessToken: result.accessToken, user: this.sanitizeUser(result.user) };
   }
 
+  @Post('clear-session')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Șterge cookies de sesiune (fără autentificare)' })
+  clearSession(@Res({ passthrough: true }) res: Response) {
+    res.clearCookie('refresh_token', { path: '/api/auth/refresh' });
+    res.clearCookie('user_role');
+    return { ok: true };
+  }
+
+  @Get('clear-session')
+  @HttpCode(HttpStatus.OK)
+  clearSessionGet(@Res() res: Response) {
+    (res as any).clearCookie('refresh_token', { path: '/api/auth/refresh' });
+    (res as any).clearCookie('user_role');
+    (res as any).redirect('http://localhost:3000/login');
+  }
+
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @UseGuards(AuthGuard('jwt-refresh'))
@@ -62,9 +81,15 @@ export class AuthController {
     @CurrentUser() user: any,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.authService.refresh(user.sub, user.email, user.role, user.tokenVersion ?? 0);
-    this.setRefreshCookie(res, result.refreshToken);
-    return { accessToken: result.accessToken };
+    try {
+      const result = await this.authService.refresh(user.sub, user.email, user.role, user.tokenVersion ?? 0);
+      this.setRefreshCookie(res, result.refreshToken);
+      return { accessToken: result.accessToken };
+    } catch {
+      res.clearCookie('refresh_token', { path: '/api/auth/refresh' });
+      res.clearCookie('user_role');
+      throw new UnauthorizedException('Sesiune expirată');
+    }
   }
 
   @Post('logout')
