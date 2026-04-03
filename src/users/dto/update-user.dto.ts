@@ -11,8 +11,8 @@ export class UpdateUserDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  // Only CDN/HTTP(S) URLs accepted — prevents setting arbitrary data URIs or javascript: URLs
-  @IsUrl({ require_tld: false }, { message: 'Avatar-ul trebuie să fie un URL valid' })
+  // Only HTTPS CDN URLs accepted (set via POST /users/me/avatar upload endpoint)
+  @IsUrl({ protocols: ['https'], require_tld: true }, { message: 'Avatar-ul trebuie să fie un URL HTTPS valid' })
   avatar?: string;
 
   @ApiPropertyOptional()

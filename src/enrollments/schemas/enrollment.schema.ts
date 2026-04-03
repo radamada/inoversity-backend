@@ -17,6 +17,24 @@ export class Enrollment {
   @Prop({ type: [{ type: Types.ObjectId, ref: 'Lesson' }], default: [] })
   completedLessons: Types.ObjectId[];
 
+  @Prop({
+    type: [
+      {
+        quizId: { type: Types.ObjectId, ref: 'Lesson', required: true },
+        score: { type: Number, required: true },
+        passed: { type: Boolean, required: true },
+        attemptedAt: { type: Date, required: true },
+      },
+    ],
+    default: [],
+  })
+  quizAttempts: {
+    quizId: Types.ObjectId;
+    score: number;
+    passed: boolean;
+    attemptedAt: Date;
+  }[];
+
   @Prop({ type: Date, default: null })
   lastAccessedAt: Date | null;
 

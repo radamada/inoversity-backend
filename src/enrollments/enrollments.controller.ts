@@ -1,8 +1,10 @@
 import {
   Controller,
   Get,
+  Post,
   Patch,
   Param,
+  Body,
   Res,
   UseGuards,
   HttpCode,
@@ -11,10 +13,17 @@ import {
 import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { IsArray, IsNumber } from 'class-validator';
 import { EnrollmentsService } from './enrollments.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
+
+class SubmitQuizDto {
+  @IsArray()
+  @IsNumber({}, { each: true })
+  answers: number[];
+}
 
 @ApiTags('Enrollments')
 @ApiBearerAuth()
@@ -26,6 +35,12 @@ export class EnrollmentsController {
   @Get()
   getMyEnrollments(@CurrentUser() user: any) {
     return this.enrollmentsService.getMyEnrollments(user._id.toString());
+  }
+
+  @Get('check/:courseId')
+  async checkEnrolled(@CurrentUser() user: any, @Param('courseId', ParseObjectIdPipe) courseId: string) {
+    const enrolled = await this.enrollmentsService.isEnrolled(user._id.toString(), courseId);
+    return { enrolled };
   }
 
   @Get(':courseId/progress')
@@ -60,6 +75,23 @@ export class EnrollmentsController {
       user._id.toString(),
       courseId,
       lessonId,
+    );
+  }
+
+  @Post(':courseId/quiz/:quizId/submit')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60000, limit: 60 } })
+  submitQuiz(
+    @CurrentUser() user: any,
+    @Param('courseId', ParseObjectIdPipe) courseId: string,
+    @Param('quizId', ParseObjectIdPipe) quizId: string,
+    @Body() dto: SubmitQuizDto,
+  ) {
+    return this.enrollmentsService.submitQuizAttempt(
+      user._id.toString(),
+      courseId,
+      quizId,
+      dto.answers,
     );
   }
 }

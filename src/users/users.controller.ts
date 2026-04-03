@@ -64,7 +64,7 @@ export class UsersController {
     // Normalize HEIC detected by extension
     if (isHeic && !file.mimetype.startsWith('image/')) file.mimetype = 'image/heic';
     // Explicit allowlist — SVG is blocked (stored XSS vector via embedded JavaScript)
-    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heic-sequence', 'image/heif', 'application/octet-stream'];
+    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heic-sequence', 'image/heif'];
     if (!allowedMimes.includes(file.mimetype) && !isHeic) {
       throw new BadRequestException('Format neacceptat. Sunt permise: JPEG, PNG, WebP, GIF, HEIC');
     }

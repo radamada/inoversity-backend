@@ -25,6 +25,9 @@ import {
   MaxLength,
   IsEnum,
   ArrayMaxSize,
+  ArrayMinSize,
+  ValidateNested,
+  IsInt,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -37,12 +40,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 import { CreateCourseDto } from '../courses/dto/create-course.dto';
-
-class SaveCurriculumDto {
-  @IsArray()
-  @ArrayMaxSize(500, { message: 'Curriculumul nu poate depăși 500 de elemente' })
-  curriculum: any[];
-}
+import { SaveCurriculumDto } from '../courses/dto/save-curriculum.dto';
 
 class SetRoleDto {
   @ApiProperty({ enum: ['student', 'instructor', 'admin'] })
@@ -103,6 +101,48 @@ class CreateLessonDto {
   @ApiPropertyOptional()
   @IsOptional()
   isFree?: boolean;
+}
+
+class QuizQuestionDto {
+  @IsString()
+  question: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @ArrayMinSize(2)
+  options: string[];
+
+  @IsInt()
+  @Min(0)
+  correctIndex: number;
+}
+
+class CreateQuizDto {
+  @ApiProperty()
+  @IsString()
+  @MinLength(2)
+  title: string;
+
+  @ApiProperty()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => QuizQuestionDto)
+  questions: QuizQuestionDto[];
+}
+
+class UpdateQuizDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  title?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => QuizQuestionDto)
+  questions?: QuizQuestionDto[];
 }
 
 class PaginationDto {
@@ -202,13 +242,21 @@ export class AdminController {
   }
 
   @Patch('users/:id/role')
-  setRole(@Param('id', ParseObjectIdPipe) id: string, @Body() dto: SetRoleDto) {
-    return this.adminService.setUserRole(id, dto.role);
+  setRole(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: SetRoleDto,
+    @CurrentUser() admin: any,
+  ) {
+    return this.adminService.setUserRole(id, dto.role, admin._id);
   }
 
   @Patch('users/:id/active')
-  setActive(@Param('id', ParseObjectIdPipe) id: string, @Body() dto: SetActiveDto) {
-    return this.adminService.setUserActive(id, dto.isActive);
+  setActive(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: SetActiveDto,
+    @CurrentUser() admin: any,
+  ) {
+    return this.adminService.setUserActive(id, dto.isActive, admin._id);
   }
 
   // ── Orders ──────────────────────────────────────────────────────────────────
@@ -249,6 +297,12 @@ export class AdminController {
     return this.coursesService.findById(id);
   }
 
+  @Get('courses/:id/curriculum')
+  @ApiOperation({ summary: 'Curriculum curs (include răspunsuri corecte pentru editor)' })
+  getCurriculum(@Param('id', ParseObjectIdPipe) id: string) {
+    return this.coursesService.getCurriculum(id, true);
+  }
+
   @Post('courses')
   @ApiOperation({ summary: 'Creare curs nou' })
   createCourse(@Body() dto: CreateCourseDto, @CurrentUser() user: any) {
@@ -277,8 +331,12 @@ export class AdminController {
   @Delete('courses/:id/pending-changes')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Renunță la modificările în așteptare' })
-  discardChanges(@Param('id', ParseObjectIdPipe) id: string, @CurrentUser() user: any) {
-    return this.coursesService.discardPendingChanges(id, user._id.toString(), true);
+  discardChanges(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() body: { videoIds?: string[] },
+    @CurrentUser() user: any,
+  ) {
+    return this.coursesService.discardPendingChanges(id, user._id.toString(), true, body?.videoIds ?? []);
   }
 
   @Put('courses/:id/pending-curriculum')
@@ -288,7 +346,7 @@ export class AdminController {
     @Body() body: SaveCurriculumDto,
     @CurrentUser() user: any,
   ) {
-    return this.coursesService.savePendingCurriculum(id, body.curriculum, user._id.toString(), true);
+    return this.coursesService.savePendingCurriculum(id, body.curriculum as any, user._id.toString(), true);
   }
 
   @Delete('courses/:id')
@@ -335,5 +393,25 @@ export class AdminController {
   @HttpCode(HttpStatus.NO_CONTENT)
   deleteLesson(@Param('id', ParseObjectIdPipe) id: string) {
     return this.coursesService.deleteLesson(id);
+  }
+
+  // ── Quizzes ──────────────────────────────────────────────────────────────
+
+  @Post('courses/:courseId/sections/:sectionId/quizzes')
+  createQuiz(
+    @Param('courseId', ParseObjectIdPipe) courseId: string,
+    @Param('sectionId', ParseObjectIdPipe) sectionId: string,
+    @Body() dto: CreateQuizDto,
+  ) {
+    return this.coursesService.createQuiz(courseId, sectionId, dto);
+  }
+
+  @Patch('courses/:courseId/quizzes/:quizId')
+  updateQuiz(
+    @Param('courseId', ParseObjectIdPipe) courseId: string,
+    @Param('quizId', ParseObjectIdPipe) quizId: string,
+    @Body() dto: UpdateQuizDto,
+  ) {
+    return this.coursesService.updateQuiz(quizId, dto);
   }
 }

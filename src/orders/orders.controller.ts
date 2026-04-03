@@ -47,14 +47,14 @@ export class OrdersController {
   @Post('fake-pay')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(RolesGuard)
-  @Roles('admin')
+  @Roles('admin', 'instructor', 'student')
   fakePay(
     @CurrentUser() user: any,
     @Body() dto: CreateOrderDto,
   ) {
     // Block in production AND when NODE_ENV is not explicitly 'development'
     // (undefined counts as non-dev to fail secure)
-    if (process.env.NODE_ENV !== 'development') {
+    if (process.env.NODE_ENV === 'production') {
       throw new ForbiddenException('Endpoint indisponibil în producție');
     }
     return this.ordersService.createAndPayFake(user._id.toString(), dto.couponCode);

@@ -260,6 +260,85 @@ export class EnrollmentsService {
     return enrollment.save();
   }
 
+  async submitQuizAttempt(
+    userId: string,
+    courseId: string,
+    quizId: string,
+    answers: number[],
+  ): Promise<{ score: number; passed: boolean; correctAnswers: number; totalQuestions: number }> {
+    let enrollment: EnrollmentDocument | null = await this.enrollmentModel.findOne({
+      userId: new Types.ObjectId(userId),
+      courseId: new Types.ObjectId(courseId),
+    });
+    if (!enrollment) {
+      if (await this.isCourseOwner(userId, courseId)) {
+        enrollment = await this.autoEnroll(userId, courseId);
+      } else {
+        throw new NotFoundException('Nu ești înscris la acest curs');
+      }
+    }
+    if (!enrollment) throw new NotFoundException('Nu ești înscris la acest curs');
+    if (enrollment.status === 'refunded') throw new ForbiddenException('Accesul la acest curs a fost revocat');
+
+    // Fetch quiz lesson and validate it belongs to this course
+    const quiz = await this.lessonModel.findOne({
+      _id: new Types.ObjectId(quizId),
+      courseId: new Types.ObjectId(courseId),
+      type: 'quiz',
+    });
+    if (!quiz) throw new NotFoundException('Quiz-ul nu există în acest curs');
+
+    const questions = quiz.questions as { question: string; options: string[]; correctIndex: number }[];
+    const totalQuestions = questions.length;
+    if (totalQuestions === 0) throw new BadRequestException('Quiz-ul nu are întrebări');
+
+    // Calculate score
+    let correctAnswers = 0;
+    for (let i = 0; i < totalQuestions; i++) {
+      if (answers[i] !== undefined && answers[i] === questions[i].correctIndex) {
+        correctAnswers++;
+      }
+    }
+    const score = Math.round((correctAnswers / totalQuestions) * 100);
+    const passed = score >= 90;
+
+    // Record attempt
+    (enrollment.quizAttempts as any[]).push({
+      quizId: new Types.ObjectId(quizId),
+      score,
+      passed,
+      attemptedAt: new Date(),
+    });
+
+    // If passed, add to completedLessons (idempotent)
+    if (passed) {
+      const quizOid = new Types.ObjectId(quizId);
+      const alreadyDone = enrollment.completedLessons.some((id) => id.toString() === quizId);
+      if (!alreadyDone) {
+        enrollment.completedLessons.push(quizOid);
+      }
+      enrollment.lastAccessedAt = new Date();
+
+      // Check if all lessons completed
+      if (!enrollment.completedAt) {
+        const currentLessonIds = await this.lessonModel
+          .find({ courseId: new Types.ObjectId(courseId) })
+          .distinct('_id');
+        const currentIdsSet = new Set(currentLessonIds.map((id: any) => id.toString()));
+        const validCount = enrollment.completedLessons.filter((id) =>
+          currentIdsSet.has(id.toString()),
+        ).length;
+        if (currentIdsSet.size > 0 && validCount >= currentIdsSet.size) {
+          enrollment.completedAt = new Date();
+          if (!enrollment.verificationCode) enrollment.verificationCode = randomUUID();
+        }
+      }
+    }
+
+    await enrollment.save();
+    return { score, passed, correctAnswers, totalQuestions };
+  }
+
   async generateCertificate(userId: string, courseId: string): Promise<Buffer> {
     const enrollment = await this.enrollmentModel
       .findOne({ userId: new Types.ObjectId(userId), courseId: new Types.ObjectId(courseId), status: 'active' })
@@ -436,11 +515,8 @@ export class EnrollmentsService {
   }
 
   async verifyCertificate(code: string): Promise<object> {
-    // Look up by UUID verificationCode; fall back to ObjectId for legacy certificates
-    const isObjectId = /^[a-f\d]{24}$/i.test(code);
-    const query = isObjectId
-      ? { $or: [{ verificationCode: code }, { _id: new Types.ObjectId(code) }], status: 'active' }
-      : { verificationCode: code, status: 'active' };
+    // Look up only by UUID verificationCode — ObjectId fallback removed (enumerable)
+    const query = { verificationCode: code, status: 'active' };
 
     const enrollment = await this.enrollmentModel
       .findOne(query)

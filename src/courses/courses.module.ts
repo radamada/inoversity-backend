@@ -11,9 +11,11 @@ import { Review, ReviewSchema } from '../reviews/schemas/review.schema';
 import { Cart, CartSchema } from '../cart/schemas/cart.schema';
 import { Order, OrderSchema } from '../orders/schemas/order.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { MediaModule } from '../media/media.module';
 
 @Module({
   imports: [
+    MediaModule,
     MongooseModule.forFeature([
       { name: Course.name, schema: CourseSchema },
       { name: Section.name, schema: SectionSchema },

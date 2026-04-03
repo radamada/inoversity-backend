@@ -33,10 +33,25 @@ export class CoursesController {
     return this.coursesService.findAll(query);
   }
 
+  @Post('lesson-counts')
+  @ApiOperation({ summary: 'Get lesson counts for multiple courses (batch)' })
+  async getLessonCounts(@Body() body: { courseIds: string[] }) {
+    const ids = (body.courseIds ?? []).slice(0, 50); // cap at 50
+    return this.coursesService.getLessonCounts(ids);
+  }
+
   @Get(':slug')
   @ApiOperation({ summary: 'Detalii curs după slug' })
   findOne(@Param('slug') slug: string) {
     return this.coursesService.findBySlug(slug);
+  }
+
+  @Get(':slug/access')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Detalii curs pentru studenți înscriși (inclusiv cursuri retrase)' })
+  findForEnrolled(@Param('slug') slug: string, @CurrentUser() user: any) {
+    return this.coursesService.findBySlugForEnrolled(slug, user._id.toString());
   }
 
   @Get(':id/curriculum')
@@ -45,6 +60,22 @@ export class CoursesController {
     // Only expose curriculum for published courses
     const course = await this.coursesService.findById(id);
     if (!course.published) throw new NotFoundException('Cursul nu a fost găsit');
+    return this.coursesService.getCurriculum(id);
+  }
+
+  @Get(':id/curriculum/enrolled')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Curriculum pentru studenți înscriși (inclusiv cursuri retrase)' })
+  async getCurriculumForEnrolled(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser() user: any,
+  ) {
+    const course = await this.coursesService.findById(id);
+    if (course.published) return this.coursesService.getCurriculum(id);
+    // Unpublished — verify enrollment
+    const enrollment = await this.coursesService.checkEnrollment(id, user._id.toString());
+    if (!enrollment) throw new NotFoundException('Cursul nu a fost găsit');
     return this.coursesService.getCurriculum(id);
   }
 

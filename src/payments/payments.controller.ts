@@ -20,7 +20,8 @@ import { OrdersService } from '../orders/orders.service';
 export class PaymentsController {
   private stripe: Stripe;
   private readonly logger = new Logger(PaymentsController.name);
-  private processedEvents = new Set<string>();
+  private processedEvents = new Map<string, number>();
+  private readonly MAX_PROCESSED_EVENTS = 10000;
 
   constructor(
     private ordersService: OrdersService,
@@ -65,6 +66,16 @@ export class PaymentsController {
       return res.json({ received: true });
     }
 
+    // Evict oldest entries if the map grows too large
+    if (this.processedEvents.size >= this.MAX_PROCESSED_EVENTS) {
+      const cutoff = this.processedEvents.size - Math.floor(this.MAX_PROCESSED_EVENTS / 2);
+      let i = 0;
+      for (const key of this.processedEvents.keys()) {
+        if (i++ >= cutoff) break;
+        this.processedEvents.delete(key);
+      }
+    }
+
     if (event.type === 'payment_intent.succeeded') {
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
       try {
@@ -75,7 +86,7 @@ export class PaymentsController {
       }
     }
 
-    this.processedEvents.add(event.id);
+    this.processedEvents.set(event.id, Date.now());
     res.json({ received: true });
   }
 }

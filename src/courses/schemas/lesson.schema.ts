@@ -3,6 +3,12 @@ import { Document, Types } from 'mongoose';
 
 export type LessonDocument = Lesson & Document;
 
+export class QuizQuestion {
+  question: string;
+  options: string[];      // exactly 4 options
+  correctIndex: number;   // 0-based index of correct option
+}
+
 @Schema({ timestamps: true })
 export class Lesson {
   @Prop({ type: Types.ObjectId, ref: 'Course', required: true })
@@ -17,6 +23,9 @@ export class Lesson {
   @Prop({ default: '' })
   description: string;
 
+  @Prop({ type: String, enum: ['video', 'quiz'], default: 'video' })
+  type: 'video' | 'quiz';
+
   @Prop({ default: '' })
   cdnVideoId: string; // Bunny.net video GUID
 
@@ -28,6 +37,18 @@ export class Lesson {
 
   @Prop({ default: false })
   isFree: boolean; // preview gratuit
+
+  @Prop({
+    type: [
+      {
+        question: { type: String, required: true },
+        options: { type: [String], required: true },
+        correctIndex: { type: Number, required: true },
+      },
+    ],
+    default: [],
+  })
+  questions: QuizQuestion[];
 }
 
 export const LessonSchema = SchemaFactory.createForClass(Lesson);

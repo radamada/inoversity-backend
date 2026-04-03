@@ -70,7 +70,8 @@ export class AuthController {
   clearSessionGet(@Res() res: Response) {
     (res as any).clearCookie('refresh_token', { path: '/api/auth/refresh' });
     (res as any).clearCookie('user_role');
-    (res as any).redirect('http://localhost:3000/login');
+    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+    (res as any).redirect(`${frontendUrl}/login`);
   }
 
   @Post('refresh')

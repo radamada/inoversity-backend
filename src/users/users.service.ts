@@ -90,7 +90,8 @@ export class UsersService {
     const skip = (page - 1) * limit;
     const query: any = {};
     if (search && search.trim()) {
-      query.email = { $regex: search.trim(), $options: 'i' };
+      const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      query.email = { $regex: escaped, $options: 'i' };
     }
     const [users, total] = await Promise.all([
       this.userModel.find(query).select('-passwordHash').skip(skip).limit(limit).exec(),

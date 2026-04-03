@@ -14,7 +14,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { IsString, IsOptional, IsBoolean, IsNumber, Min, Max, MinLength, IsArray, ArrayMaxSize } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsNumber, Min, Max, MinLength, IsArray, ArrayMaxSize, ArrayMinSize, ValidateNested, IsInt } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { InstructorService } from './instructor.service';
@@ -24,6 +24,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CoursesService } from '../courses/courses.service';
 import { CreateCourseDto } from '../courses/dto/create-course.dto';
+import { SaveCurriculumDto } from '../courses/dto/save-curriculum.dto';
 import { CouponsService } from '../coupons/coupons.service';
 import type { CreateCouponDto } from '../coupons/coupons.service';
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
@@ -63,12 +64,6 @@ class OrdersQueryDto extends PaginationDto {
   @IsOptional()
   @IsString()
   search?: string;
-}
-
-class SaveCurriculumDto {
-  @IsArray()
-  @ArrayMaxSize(500, { message: 'Curriculumul nu poate depăși 500 de elemente' })
-  curriculum: any[];
 }
 
 class CreateSectionDto {
@@ -120,6 +115,48 @@ class CreateLessonDto {
   isFree?: boolean;
 }
 
+class QuizQuestionDto {
+  @IsString()
+  question: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @ArrayMinSize(2)
+  options: string[];
+
+  @IsInt()
+  @Min(0)
+  correctIndex: number;
+}
+
+class CreateQuizDto {
+  @ApiProperty()
+  @IsString()
+  @MinLength(2)
+  title: string;
+
+  @ApiProperty()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => QuizQuestionDto)
+  questions: QuizQuestionDto[];
+}
+
+class UpdateQuizDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  title?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => QuizQuestionDto)
+  questions?: QuizQuestionDto[];
+}
+
 @ApiTags('Instructor')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -160,6 +197,13 @@ export class InstructorController {
     return this.instructorService.getCourseById(id, user._id.toString(), false);
   }
 
+  @Get('courses/:id/curriculum')
+  @ApiOperation({ summary: 'Curriculum curs (include răspunsuri corecte pentru editor)' })
+  async getCurriculum(@Param('id', ParseObjectIdPipe) id: string, @CurrentUser() user: any) {
+    await this.instructorService.getCourseById(id, user._id.toString(), false);
+    return this.coursesService.getCurriculum(id, true);
+  }
+
   @Post('courses')
   @ApiOperation({ summary: 'Creare curs nou' })
   createCourse(@Body() dto: CreateCourseDto, @CurrentUser() user: any) {
@@ -191,8 +235,12 @@ export class InstructorController {
   @Delete('courses/:id/pending-changes')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Renunță la modificările în așteptare' })
-  discardChanges(@Param('id', ParseObjectIdPipe) id: string, @CurrentUser() user: any) {
-    return this.coursesService.discardPendingChanges(id, user._id.toString(), false);
+  discardChanges(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() body: { videoIds?: string[] },
+    @CurrentUser() user: any,
+  ) {
+    return this.coursesService.discardPendingChanges(id, user._id.toString(), false, body?.videoIds ?? []);
   }
 
   @Put('courses/:id/pending-curriculum')
@@ -202,7 +250,7 @@ export class InstructorController {
     @Body() body: SaveCurriculumDto,
     @CurrentUser() user: any,
   ) {
-    return this.coursesService.savePendingCurriculum(id, body.curriculum, user._id.toString(), false);
+    return this.coursesService.savePendingCurriculum(id, body.curriculum as any, user._id.toString(), false);
   }
 
   // ── Orders ────────────────────────────────────────────────────────────────
@@ -270,6 +318,28 @@ export class InstructorController {
   @HttpCode(HttpStatus.NO_CONTENT)
   deleteLesson(@Param('id', ParseObjectIdPipe) id: string, @CurrentUser() user: any) {
     return this.instructorService.deleteLesson(id, user._id.toString(), false);
+  }
+
+  // ── Quizzes ───────────────────────────────────────────────────────────────
+
+  @Post('courses/:courseId/sections/:sectionId/quizzes')
+  createQuiz(
+    @Param('courseId', ParseObjectIdPipe) courseId: string,
+    @Param('sectionId', ParseObjectIdPipe) sectionId: string,
+    @Body() dto: CreateQuizDto,
+    @CurrentUser() user: any,
+  ) {
+    return this.instructorService.createQuiz(courseId, sectionId, dto, user._id.toString(), false);
+  }
+
+  @Patch('courses/:courseId/quizzes/:quizId')
+  updateQuiz(
+    @Param('courseId', ParseObjectIdPipe) courseId: string,
+    @Param('quizId', ParseObjectIdPipe) quizId: string,
+    @Body() dto: UpdateQuizDto,
+    @CurrentUser() user: any,
+  ) {
+    return this.instructorService.updateQuiz(courseId, quizId, dto, user._id.toString(), false);
   }
 
   // ── Coupons ───────────────────────────────────────────────────────────────

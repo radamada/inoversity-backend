@@ -79,7 +79,7 @@ export class MailService {
               <h1 style="color: white; margin: 0; font-size: 24px;">EduInovatrium</h1>
             </div>
             <div style="background: #f9fafb; padding: 32px; border-radius: 0 0 8px 8px; border: 1px solid #e5e7eb; border-top: none;">
-              <h2 style="color: #111827; margin-top: 0;">Bine ai venit, ${name}!</h2>
+              <h2 style="color: #111827; margin-top: 0;">Bine ai venit, ${escapeHtml(name)}!</h2>
               <p style="color: #6b7280;">Contul tău a fost creat cu succes. Explorează sute de cursuri premium și începe să înveți azi.</p>
               <div style="text-align: center; margin: 32px 0;">
                 <a href="${frontendUrl}"

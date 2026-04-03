@@ -10,6 +10,7 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  HttpCode,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -87,6 +88,42 @@ export class MediaController {
     }
     await this.mediaService.deleteImage(url);
     return { success: true };
+  }
+
+  @Post('videos/cleanup')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Șterge mai multe video-uri orfane de pe CDN (doar admin)' })
+  async cleanupVideos(@Body() body: { videoIds: string[] }) {
+    const ids: string[] = Array.isArray(body?.videoIds) ? body.videoIds.slice(0, 50) : [];
+    await Promise.all(ids.map((id) => this.mediaService.deleteVideo(id).catch(() => null)));
+  }
+
+  @Delete('video/:videoId')
+  @UseGuards(RolesGuard)
+  @Roles('admin', 'instructor')
+  @ApiOperation({ summary: 'Șterge un video de pe CDN (pentru lecții nesalvate)' })
+  async deleteVideo(
+    @Param('videoId') videoId: string,
+    @CurrentUser() user: any,
+  ) {
+    if (user.role !== 'admin') {
+      const owns = await this.mediaService.isVideoOwnedByUser(videoId, user._id.toString());
+      if (!owns) {
+        throw new BadRequestException('Nu ai permisiunea să ștergi acest videoclip');
+      }
+    }
+    await this.mediaService.deleteVideo(videoId);
+    return { success: true };
+  }
+
+  @Get('video-status/:videoId')
+  @UseGuards(RolesGuard)
+  @Roles('admin', 'instructor')
+  @ApiOperation({ summary: 'Status procesare video pe CDN (0-6; 4=Finished)' })
+  getVideoStatus(@Param('videoId') videoId: string) {
+    return this.mediaService.getVideoStatus(videoId);
   }
 
   @Get('play-url/:videoId')

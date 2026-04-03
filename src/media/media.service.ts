@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException, ForbiddenException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, ForbiddenException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
@@ -58,6 +58,7 @@ export class MediaService {
    * Accepts a file from disk (multer diskStorage), streams it to Bunny.net.
    */
   async uploadVideo(file: Express.Multer.File, title: string): Promise<{ videoId: string }> {
+
     let videoId: string | null = null;
     try {
       // 1. Create video entry in Bunny.net
@@ -223,9 +224,20 @@ export class MediaService {
     }
     const filePath = cdnUrl.slice(prefix.length); // e.g. "/thumbnails/123-file.png"
 
-    // Prevent directory traversal — normalize and verify path stays within CDN root
-    const normalizedPath = filePath.replace(/\\/g, '/').replace(/\/\.\.\//g, '/').replace(/\/\.\.$/, '');
+    // Prevent directory traversal — decode percent-encoded sequences, normalize, and verify
+    let normalizedPath: string;
+    try {
+      normalizedPath = decodeURIComponent(filePath);
+    } catch {
+      throw new BadRequestException('URL invalid');
+    }
+    normalizedPath = normalizedPath.replace(/\\/g, '/');
+    // Reject any path containing '..' regardless of encoding
     if (normalizedPath.includes('..')) {
+      throw new BadRequestException('URL invalid');
+    }
+    // Only allow alphanumeric, dash, underscore, dot, and forward slash
+    if (!/^[\w.\-\/]+$/.test(normalizedPath)) {
       throw new BadRequestException('URL invalid');
     }
 
@@ -237,6 +249,35 @@ export class MediaService {
     } catch {
       throw new InternalServerErrorException('Eroare la ștergerea fișierului de pe CDN');
     }
+  }
+
+  /**
+   * Get processing status of a video from Bunny.net.
+   * Status codes: 0=Created, 1=Uploaded, 2=Processing, 3=Transcoding, 4=Finished, 5=Error, 6=UploadFailed
+   */
+  async getVideoStatus(videoId: string): Promise<{ status: number; encodeProgress: number }> {
+    try {
+      const res = await axios.get(
+        `${this.baseUrl}/library/${this.libraryId}/videos/${videoId}`,
+        { headers: { AccessKey: this.apiKey } },
+      );
+      return { status: res.data.status ?? 0, encodeProgress: res.data.encodeProgress ?? 0 };
+    } catch {
+      throw new NotFoundException('Videoclipul nu a fost găsit pe CDN');
+    }
+  }
+
+  /**
+   * Check if a video (by CDN GUID) belongs to a course owned by the given instructor.
+   */
+  async isVideoOwnedByUser(videoId: string, userId: string): Promise<boolean> {
+    const lesson = await this.lessonModel.findOne({ cdnVideoId: videoId }).lean();
+    if (!lesson) return true; // orphan video (not linked to any lesson) — allow deletion
+    const course = await this.courseModel.findOne({
+      _id: lesson.courseId,
+      instructorId: new Types.ObjectId(userId),
+    }).lean();
+    return !!course;
   }
 
   /**

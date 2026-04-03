@@ -271,6 +271,30 @@ export class InstructorService {
     return this.coursesService.deleteLesson(lessonId);
   }
 
+  // ── Quizzes ───────────────────────────────────────────────────────────────
+
+  async createQuiz(
+    courseId: string,
+    sectionId: string,
+    dto: { title: string; questions: { question: string; options: string[]; correctIndex: number }[] },
+    instructorId: string,
+    isAdmin = false,
+  ) {
+    await this.assertCourseOwner(courseId, instructorId, isAdmin);
+    return this.coursesService.createQuiz(courseId, sectionId, dto);
+  }
+
+  async updateQuiz(
+    courseId: string,
+    quizId: string,
+    dto: Partial<{ title: string; questions: { question: string; options: string[]; correctIndex: number }[] }>,
+    instructorId: string,
+    isAdmin = false,
+  ) {
+    await this.assertCourseOwner(courseId, instructorId, isAdmin);
+    return this.coursesService.updateQuiz(quizId, dto);
+  }
+
   // ── Publish ───────────────────────────────────────────────────────────────
 
   async togglePublish(courseId: string, instructorId: string, isAdmin = false) {

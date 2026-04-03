@@ -266,12 +266,13 @@ export class CouponsService {
     }
   }
 
-  async findAll(): Promise<CouponDocument[]> {
+  async findAll(limit = 200): Promise<CouponDocument[]> {
     return this.couponModel
       .find()
       .populate('instructorId', 'name email role')
       .populate('courseId', 'title slug')
       .sort({ createdAt: -1 })
+      .limit(Math.min(limit, 500))
       .exec();
   }
 

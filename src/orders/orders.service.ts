@@ -35,13 +35,45 @@ export class OrdersService {
   }
 
   async createOrder(userId: string, couponCode?: string) {
+    // M2: Prevent duplicate pending orders — if user already has a pending order
+    // with the same courses, return the existing one instead of creating a new PaymentIntent
     const cartItems = await this.cartService.getCartItems(userId);
     if (!cartItems.length) throw new BadRequestException('Coșul este gol');
+
+    const cartCourseIds = cartItems.map((id) => id.toString()).sort();
+
+    const existingPending = await this.orderModel.findOne({
+      userId: new Types.ObjectId(userId),
+      status: 'pending',
+      createdAt: { $gt: new Date(Date.now() - 30 * 60 * 1000) }, // within last 30 min
+    }).lean();
+
+    if (existingPending) {
+      const existingCourseIds = existingPending.items.map((i) => i.courseId.toString()).sort();
+      if (JSON.stringify(existingCourseIds) === JSON.stringify(cartCourseIds) && existingPending.stripeClientSecret) {
+        return {
+          orderId: existingPending._id,
+          clientSecret: existingPending.stripeClientSecret,
+          total: existingPending.total,
+          discountAmount: existingPending.discountAmount,
+          subtotal: existingPending.items.reduce((sum, i) => sum + i.price, 0),
+        };
+      }
+    }
 
     // Fetch course details for price snapshot
     const courses = await Promise.all(
       cartItems.map((id) => this.coursesService.findById(id.toString())),
     );
+
+    // M1: Check if user is already enrolled in any of these courses
+    for (const course of courses) {
+      const enrolled = await this.enrollmentsService.isEnrolled(userId, course._id.toString());
+      if (enrolled) {
+        throw new BadRequestException(`Ești deja înscris la cursul "${course.title}"`);
+      }
+    }
+
     const items = courses.map((course) => ({
       courseId: course._id as Types.ObjectId,
       title: course.title,
@@ -147,12 +179,13 @@ export class OrdersService {
   async getMyOrders(userId: string) {
     return this.orderModel
       .find({ userId })
+      .select('-stripeClientSecret -stripePaymentIntentId')
       .sort({ createdAt: -1 })
       .exec();
   }
 
   async getOrderById(id: string, userId: string) {
-    const order = await this.orderModel.findById(id);
+    const order = await this.orderModel.findById(id).select('-stripeClientSecret -stripePaymentIntentId');
     if (!order) throw new NotFoundException('Comanda nu a fost găsită');
     if (order.userId.toString() !== userId) throw new NotFoundException('Comanda nu a fost găsită');
     return order;
@@ -264,6 +297,13 @@ export class OrdersService {
         this.logger.error(`Stripe refund error: ${stripeErr?.message}`);
         throw new BadRequestException('Rambursarea a eșuat. Contactează suportul.');
       }
+    }
+
+    // Rollback coupon usage if a coupon was applied
+    if (order.couponCode) {
+      await this.couponsService.rollbackUsage(order.couponCode, order.userId.toString()).catch((err) => {
+        this.logger.error(`Failed to rollback coupon usage for order ${orderId}: ${err?.message}`);
+      });
     }
 
     // Revoke enrollments

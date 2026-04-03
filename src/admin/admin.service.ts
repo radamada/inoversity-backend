@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { User, UserDocument } from '../users/schemas/user.schema';
@@ -44,11 +44,17 @@ export class AdminService {
     return this.usersService.findAll(page, limit, search);
   }
 
-  setUserRole(id: string, role: string) {
+  setUserRole(id: string, role: string, adminId?: string) {
+    if (adminId && id === adminId.toString()) {
+      throw new BadRequestException('Nu îți poți schimba propriul rol');
+    }
     return this.usersService.setRole(id, role);
   }
 
-  setUserActive(id: string, isActive: boolean) {
+  setUserActive(id: string, isActive: boolean, adminId?: string) {
+    if (adminId && id === adminId.toString()) {
+      throw new BadRequestException('Nu îți poți dezactiva propriul cont');
+    }
     return this.usersService.setActive(id, isActive);
   }
 
@@ -133,6 +139,7 @@ export class AdminService {
       .select('_id title instructorId')
       .populate('instructorId', 'name')
       .sort({ title: 1 })
+      .limit(500)
       .lean();
   }
 

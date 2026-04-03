@@ -18,6 +18,7 @@ import { Order, OrderDocument } from '../orders/schemas/order.schema';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { CourseQueryDto } from './dto/course-query.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { MediaService } from '../media/media.service';
 
 @Injectable()
 export class CoursesService {
@@ -31,6 +32,7 @@ export class CoursesService {
     @InjectModel(Cart.name) private cartModel: Model<CartDocument>,
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     private notificationsService: NotificationsService,
+    private mediaService: MediaService,
   ) {}
 
   // ── Courses ──────────────────────────────────────────────────────────────
@@ -168,9 +170,11 @@ export class CoursesService {
       lessons: Array<{
         lessonId: string | null;
         title: string;
-        cdnVideoId: string;
-        duration: number;
-        isFree: boolean;
+        type?: 'video' | 'quiz';
+        cdnVideoId?: string;
+        duration?: number;
+        isFree?: boolean;
+        questions?: Array<{ question: string; options: string[]; correctIndex: number }>;
       }>;
     }>,
     userId: string,
@@ -184,6 +188,29 @@ export class CoursesService {
     if (!existing.published) {
       throw new BadRequestException('Acest endpoint este doar pentru cursuri publicate');
     }
+
+    // Delete CDN videos that were in the previous pending curriculum but are removed in the new one
+    const prevPendingCurriculum = (existing.pendingChanges as any)?.curriculum;
+    if (Array.isArray(prevPendingCurriculum)) {
+      const prevVideoIds = new Set<string>(
+        prevPendingCurriculum
+          .flatMap((s: any) => s.lessons as any[])
+          .filter((l: any) => l.type !== 'quiz' && l.cdnVideoId)
+          .map((l: any) => l.cdnVideoId as string),
+      );
+      const newVideoIds = new Set<string>(
+        curriculum
+          .flatMap((s) => s.lessons)
+          .filter((l) => l.type !== 'quiz' && l.cdnVideoId)
+          .map((l) => l.cdnVideoId!),
+      );
+      for (const vid of prevVideoIds) {
+        if (!newVideoIds.has(vid)) {
+          this.mediaService.deleteVideo(vid).catch(() => null);
+        }
+      }
+    }
+
     const existingPending = (existing.pendingChanges as Record<string, any>) ?? {};
     const updated = await this.courseModel
       .findByIdAndUpdate(
@@ -208,16 +235,42 @@ export class CoursesService {
 
     const { curriculum, ...courseFields } = course.pendingChanges as Record<string, any>;
 
-    // Apply curriculum changes if present
-    if (curriculum && Array.isArray(curriculum)) {
+    // Apply curriculum changes only if non-empty and every section has a valid lessons array
+    const curriculumValid =
+      curriculum &&
+      Array.isArray(curriculum) &&
+      curriculum.length > 0 &&
+      curriculum.every((s: any) => Array.isArray(s.lessons));
+    if (curriculumValid) {
+      // Block publish if any video is still processing on CDN
+      const videoIds: string[] = curriculum
+        .flatMap((s: any) => s.lessons as any[])
+        .filter((l: any) => l.type !== 'quiz' && l.cdnVideoId)
+        .map((l: any) => l.cdnVideoId as string);
+
+      if (videoIds.length > 0) {
+        const statuses = await Promise.all(
+          videoIds.map((vid) => this.mediaService.getVideoStatus(vid).catch(() => ({ status: 5, encodeProgress: 0 }))),
+        );
+        const notReady = statuses.some((s) => s.status !== 4);
+        if (notReady) {
+          throw new BadRequestException('Există videoclipuri care nu au terminat procesarea. Așteptați și încercați din nou.');
+        }
+      }
+
       await this.applyCurriculumChanges(id, curriculum);
     }
 
-    // Apply course metadata fields (exclude curriculum key)
+    // Apply course metadata fields first (keep pendingChanges until everything succeeds)
+    if (Object.keys(courseFields).length > 0) {
+      await this.courseModel.updateOne({ _id: id }, { $set: courseFields });
+    }
+
+    // Only clear pendingChanges after all mutations succeeded
     const updated = await this.courseModel
       .findByIdAndUpdate(
         id,
-        { $set: courseFields, $unset: { pendingChanges: '' } },
+        { $unset: { pendingChanges: '' } },
         { new: true },
       )
       .populate('instructorId', 'name avatar')
@@ -231,7 +284,7 @@ export class CoursesService {
       'course_updated',
       `Cursul "${updated.title}" a fost actualizat`,
       `Instructorul a adus modificări cursului "${updated.title}". Intră să vezi ce s-a schimbat!`,
-    );
+    ).catch(() => {}); // Don't fail the publish if notification fails
 
     return updated;
   }
@@ -244,84 +297,117 @@ export class CoursesService {
       lessons: Array<{
         lessonId: string | null;
         title: string;
-        cdnVideoId: string;
-        duration: number;
-        isFree: boolean;
+        type?: 'video' | 'quiz';
+        cdnVideoId?: string;
+        duration?: number;
+        isFree?: boolean;
+        questions?: Array<{ question: string; options: string[]; correctIndex: number }>;
       }>;
     }>,
   ): Promise<void> {
     const cid = new Types.ObjectId(courseId);
+    const keptSectionIds: Types.ObjectId[] = [];
+    const keptLessonIds: Types.ObjectId[] = [];
 
-    // Find existing section IDs for this course
-    const existingSections = await this.sectionModel.find({ courseId: cid }).select('_id').lean();
-    const existingSectionIds = existingSections.map((s) => s._id.toString());
-    const pendingSectionIds = pendingSections.filter((s) => s.sectionId).map((s) => s.sectionId!);
-
-    // Delete sections removed from the pending curriculum
-    const sectionsToDelete = existingSectionIds.filter((sid) => !pendingSectionIds.includes(sid));
-    if (sectionsToDelete.length) {
-      await this.lessonModel.deleteMany({ sectionId: { $in: sectionsToDelete.map((sid) => new Types.ObjectId(sid)) } });
-      await this.sectionModel.deleteMany({ _id: { $in: sectionsToDelete.map((sid) => new Types.ObjectId(sid)) } });
-    }
-
-    // Create / update sections in order
     for (let i = 0; i < pendingSections.length; i++) {
       const ps = pendingSections[i];
       let sectionDbId: string;
 
       if (ps.sectionId) {
-        await this.sectionModel.findByIdAndUpdate(ps.sectionId, { title: ps.title, order: i });
-        sectionDbId = ps.sectionId;
+        const updated = await this.sectionModel.findByIdAndUpdate(ps.sectionId, { title: ps.title, order: i });
+        if (updated) {
+          sectionDbId = ps.sectionId;
+        } else {
+          const newSection = new this.sectionModel({ courseId: cid, title: ps.title, order: i });
+          await newSection.save();
+          sectionDbId = (newSection._id as Types.ObjectId).toString();
+        }
       } else {
         const newSection = new this.sectionModel({ courseId: cid, title: ps.title, order: i });
         await newSection.save();
         sectionDbId = (newSection._id as Types.ObjectId).toString();
       }
 
-      // Sync lessons for this section
-      const existingLessons = await this.lessonModel
-        .find({ sectionId: new Types.ObjectId(sectionDbId) })
-        .select('_id')
-        .lean();
-      const existingLessonIds = existingLessons.map((l) => l._id.toString());
-      const pendingLessonIds = ps.lessons.filter((l) => l.lessonId).map((l) => l.lessonId!);
-
-      const lessonsToDelete = existingLessonIds.filter((lid) => !pendingLessonIds.includes(lid));
-      if (lessonsToDelete.length) {
-        await this.lessonModel.deleteMany({ _id: { $in: lessonsToDelete.map((lid) => new Types.ObjectId(lid)) } });
-      }
+      keptSectionIds.push(new Types.ObjectId(sectionDbId));
 
       for (let j = 0; j < ps.lessons.length; j++) {
         const pl = ps.lessons[j];
+        const isQuiz = pl.type === 'quiz';
+        const lessonData = {
+          title: pl.title,
+          type: pl.type ?? 'video',
+          cdnVideoId: isQuiz ? '' : (pl.cdnVideoId ?? ''),
+          duration: isQuiz ? 0 : (pl.duration ?? 0),
+          isFree: isQuiz ? false : (pl.isFree ?? false),
+          questions: isQuiz ? (pl.questions ?? []) : [],
+          order: j,
+        };
+
+        let lessonDbId: Types.ObjectId;
         if (pl.lessonId) {
-          await this.lessonModel.findByIdAndUpdate(pl.lessonId, {
-            title: pl.title,
-            cdnVideoId: pl.cdnVideoId,
-            duration: pl.duration,
-            isFree: pl.isFree,
-            order: j,
-          });
+          const updated = await this.lessonModel.findByIdAndUpdate(pl.lessonId, lessonData);
+          if (updated) {
+            lessonDbId = new Types.ObjectId(pl.lessonId);
+          } else {
+            const newLesson = new this.lessonModel({ courseId: cid, sectionId: new Types.ObjectId(sectionDbId), ...lessonData });
+            await newLesson.save();
+            lessonDbId = newLesson._id as Types.ObjectId;
+          }
         } else {
-          await new this.lessonModel({
-            courseId: cid,
-            sectionId: new Types.ObjectId(sectionDbId),
-            title: pl.title,
-            cdnVideoId: pl.cdnVideoId,
-            duration: pl.duration,
-            isFree: pl.isFree,
-            order: j,
-          }).save();
+          const newLesson = new this.lessonModel({ courseId: cid, sectionId: new Types.ObjectId(sectionDbId), ...lessonData });
+          await newLesson.save();
+          lessonDbId = newLesson._id as Types.ObjectId;
         }
+        keptLessonIds.push(lessonDbId);
+      }
+    }
+
+    // Delete lessons and sections removed from the curriculum
+    const removedLessons = await this.lessonModel
+      .find({ courseId: cid, _id: { $nin: keptLessonIds } })
+      .select('cdnVideoId')
+      .lean();
+    await this.lessonModel.deleteMany({ courseId: cid, _id: { $nin: keptLessonIds } });
+    await this.sectionModel.deleteMany({ courseId: cid, _id: { $nin: keptSectionIds } });
+    // Fire-and-forget CDN cleanup — don't fail the publish if CDN deletion errors
+    for (const lesson of removedLessons) {
+      if (lesson.cdnVideoId) {
+        this.mediaService.deleteVideo(lesson.cdnVideoId).catch(() => null);
       }
     }
   }
 
-  async discardPendingChanges(id: string, userId: string, isAdmin = false): Promise<CourseDocument> {
-    const course = await this.courseModel.findById(id).select('instructorId').lean();
+  async discardPendingChanges(id: string, userId: string, isAdmin = false, pageVideoIds: string[] = []): Promise<CourseDocument> {
+    const course = await this.courseModel.findById(id).select('instructorId pendingChanges').lean();
     if (!course) throw new NotFoundException('Cursul nu a fost găsit');
     if (!isAdmin && course.instructorId.toString() !== userId) {
       throw new ForbiddenException('Nu ai permisiunea de a modifica acest curs');
     }
+
+    // Collect video IDs from pending curriculum (backend state)
+    const pendingCurriculum = (course.pendingChanges as any)?.curriculum;
+    const pendingVideoIds: string[] = Array.isArray(pendingCurriculum)
+      ? pendingCurriculum
+          .flatMap((s: any) => s.lessons as any[])
+          .filter((l: any) => l.type !== 'quiz' && l.cdnVideoId)
+          .map((l: any) => l.cdnVideoId as string)
+      : [];
+
+    // Merge with video IDs reported by the frontend (current page state) — deduped
+    const allCandidateIds = [...new Set([...pendingVideoIds, ...pageVideoIds.filter(Boolean)])];
+
+    if (allCandidateIds.length > 0) {
+      const publishedVideoIds = await this.lessonModel
+        .find({ courseId: new Types.ObjectId(id) })
+        .distinct('cdnVideoId');
+      const publishedSet = new Set(publishedVideoIds.map((v: any) => v.toString()));
+      for (const vid of allCandidateIds) {
+        if (!publishedSet.has(vid)) {
+          this.mediaService.deleteVideo(vid).catch(() => null);
+        }
+      }
+    }
+
     const updated = await this.courseModel
       .findByIdAndUpdate(id, { $unset: { pendingChanges: '' } }, { new: true })
       .populate('instructorId', 'name avatar')
@@ -333,15 +419,53 @@ export class CoursesService {
 
   async togglePublish(id: string): Promise<CourseDocument> {
     const course = await this.findById(id);
+    const wasPublished = course.published;
     course.published = !course.published;
     const saved = await course.save();
 
-    // Dacă tocmai a fost scos din publicare, notifică și curăță wishlist-urile
-    if (!saved.published) {
+    if (wasPublished && !saved.published) {
+      // Scos din publicare: curăță wishlist-uri + notifică studenți înscriși
       await this.cleanWishlistAndNotify(saved._id.toString(), saved.title);
+      this.notificationsService.notifyEnrolledUsers(
+        saved._id.toString(),
+        'course_retracted',
+        'Curs retras',
+        `Cursul „${saved.title}" a fost retras de formator și nu mai primește actualizări.`,
+      ).catch(() => null);
+    } else if (!wasPublished && saved.published) {
+      // Re-publicat: notifică studenți înscriși
+      this.notificationsService.notifyEnrolledUsers(
+        saved._id.toString(),
+        'course_republished',
+        'Vești bune!',
+        `Cursul „${saved.title}" este din nou disponibil și urmează să primească actualizări.`,
+      ).catch(() => null);
     }
 
     return saved;
+  }
+
+  async checkEnrollment(courseId: string, userId: string): Promise<boolean> {
+    const enrollment = await this.enrollmentModel
+      .findOne({ userId: new Types.ObjectId(userId), courseId: new Types.ObjectId(courseId), status: { $ne: 'refunded' } })
+      .lean();
+    return !!enrollment;
+  }
+
+  async findBySlugForEnrolled(slug: string, userId: string): Promise<CourseDocument> {
+    const course = await this.courseModel
+      .findOne({ slug })
+      .populate('instructorId', 'name avatar')
+      .populate('categoryId', 'name slug')
+      .exec();
+    if (!course) throw new NotFoundException('Cursul nu a fost găsit');
+    if (course.published) return course; // public access for published courses
+    // Unpublished — allow only if user is enrolled
+    const enrollment = await this.enrollmentModel
+      .findOne({ userId: new Types.ObjectId(userId), courseId: course._id, status: { $ne: 'refunded' } })
+      .lean();
+    if (!enrollment) throw new NotFoundException('Cursul nu a fost găsit');
+    return course;
   }
 
   async getAlsoBought(courseId: string, limit = 4): Promise<CourseDocument[]> {
@@ -369,7 +493,7 @@ export class CoursesService {
   async delete(id: string): Promise<void> {
     const course = await this.courseModel
       .findById(id)
-      .select('_id title instructorId')
+      .select('_id title instructorId thumbnail')
       .lean();
     if (!course) throw new NotFoundException('Cursul nu a fost găsit');
 
@@ -386,6 +510,13 @@ export class CoursesService {
       ),
     ]);
 
+    // Colectează CDN video IDs înainte de ștergere
+    const lessons = await this.lessonModel
+      .find({ courseId })
+      .select('cdnVideoId')
+      .lean();
+    const cdnVideoIds = lessons.map((l) => l.cdnVideoId).filter(Boolean) as string[];
+
     // Faza 2: ștergere bulk din toate colecțiile
     await Promise.all([
       this.enrollmentModel.deleteMany({ courseId }),
@@ -394,6 +525,14 @@ export class CoursesService {
       this.sectionModel.deleteMany({ courseId }),
       this.lessonModel.deleteMany({ courseId }),
     ]);
+
+    // Curăță CDN videos și thumbnail (fire-and-forget)
+    for (const videoId of cdnVideoIds) {
+      this.mediaService.deleteVideo(videoId).catch(() => null);
+    }
+    if (course.thumbnail) {
+      this.mediaService.deleteImage(course.thumbnail).catch(() => null);
+    }
 
     // Notifică instructorul că cursul lui a fost șters
     if (course.instructorId) {
@@ -490,10 +629,13 @@ export class CoursesService {
   }
 
   async deleteLesson(lessonId: string): Promise<void> {
-    await this.lessonModel.findByIdAndDelete(lessonId);
+    const lesson = await this.lessonModel.findByIdAndDelete(lessonId).lean();
+    if (lesson?.cdnVideoId) {
+      this.mediaService.deleteVideo(lesson.cdnVideoId).catch(() => null);
+    }
   }
 
-  async getCurriculum(courseId: string) {
+  async getCurriculum(courseId: string, includeCorrectAnswers = false) {
     const cid = new Types.ObjectId(courseId);
     const sections = await this.sectionModel
       .find({ courseId: cid })
@@ -507,12 +649,67 @@ export class CoursesService {
       .lean()
       .exec();
 
+    // Strip correctIndex from quiz questions for students
+    const sanitizedLessons = includeCorrectAnswers
+      ? lessons
+      : lessons.map((l) => {
+          if (l.type !== 'quiz' || !l.questions?.length) return l;
+          return {
+            ...l,
+            questions: (l.questions as any[]).map(({ correctIndex: _ci, ...q }) => q),
+          };
+        });
+
     return sections.map((section) => ({
       ...section,
-      lessons: lessons.filter(
+      lessons: sanitizedLessons.filter(
         (l) => l.sectionId.toString() === (section as any)._id.toString(),
       ),
     }));
+  }
+
+  async getLessonCounts(courseIds: string[]): Promise<Record<string, number>> {
+    if (!courseIds.length) return {};
+    const objectIds = courseIds.map((id) => new Types.ObjectId(id));
+    const results = await this.lessonModel.aggregate([
+      { $match: { courseId: { $in: objectIds } } },
+      { $group: { _id: '$courseId', count: { $sum: 1 } } },
+    ]);
+    const map: Record<string, number> = {};
+    for (const r of results) {
+      map[r._id.toString()] = r.count;
+    }
+    return map;
+  }
+
+  async createQuiz(
+    courseId: string,
+    sectionId: string,
+    data: { title: string; questions: { question: string; options: string[]; correctIndex: number }[] },
+  ): Promise<LessonDocument> {
+    const count = await this.lessonModel.countDocuments({ sectionId: new Types.ObjectId(sectionId) });
+    const quiz = new this.lessonModel({
+      courseId: new Types.ObjectId(courseId),
+      sectionId: new Types.ObjectId(sectionId),
+      title: data.title,
+      type: 'quiz',
+      questions: data.questions,
+      order: count,
+    });
+    return quiz.save();
+  }
+
+  async updateQuiz(
+    quizId: string,
+    data: Partial<{ title: string; order: number; questions: { question: string; options: string[]; correctIndex: number }[] }>,
+  ): Promise<LessonDocument> {
+    const quiz = await this.lessonModel.findByIdAndUpdate(
+      quizId,
+      { $set: data },
+      { new: true },
+    );
+    if (!quiz) throw new NotFoundException('Quiz-ul nu a fost găsit');
+    return quiz;
   }
 
   async updateRating(courseId: string): Promise<void> {
