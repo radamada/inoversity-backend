@@ -39,8 +39,30 @@ class PaginationDto {
   @Type(() => Number)
   @IsNumber()
   @Min(1)
-  @Max(100)
+  @Max(1000)
   limit?: number = 20;
+}
+
+class OrdersQueryDto extends PaginationDto {
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  @IsString()
+  courseId?: string;
+
+  @IsOptional()
+  @IsString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsString()
+  dateTo?: string;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
 }
 
 class SaveCurriculumDto {
@@ -187,8 +209,14 @@ export class InstructorController {
 
   @Get('orders')
   @ApiOperation({ summary: 'Comenzile pentru cursurile mele' })
-  getMyOrders(@Query() q: PaginationDto, @CurrentUser() user: any) {
-    return this.instructorService.getMyOrders(user._id.toString(), q.page, q.limit);
+  getMyOrders(@Query() q: OrdersQueryDto, @CurrentUser() user: any) {
+    return this.instructorService.getMyOrders(user._id.toString(), q.page, q.limit, {
+      status: q.status,
+      courseId: q.courseId,
+      dateFrom: q.dateFrom,
+      dateTo: q.dateTo,
+      search: q.search,
+    });
   }
 
   // ── Sections ──────────────────────────────────────────────────────────────

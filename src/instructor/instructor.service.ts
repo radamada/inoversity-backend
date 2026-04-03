@@ -121,30 +121,63 @@ export class InstructorService {
 
   // ── Orders ────────────────────────────────────────────────────────────────
 
-  async getMyOrders(instructorId: string, page = 1, limit = 20) {
+  async getMyOrders(
+    instructorId: string,
+    page = 1,
+    limit = 20,
+    filters: {
+      status?: string;
+      courseId?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      search?: string;
+    } = {},
+  ) {
     const myCourses = await this.courseModel
       .find({ instructorId: new Types.ObjectId(instructorId) })
-      .select('_id')
+      .select('_id title')
       .lean();
-    const courseIds = myCourses.map((c) => c._id);
+    const allCourseIds = myCourses.map((c) => c._id);
 
-    if (courseIds.length === 0) return { orders: [], total: 0, page, pages: 0 };
+    if (allCourseIds.length === 0) return { orders: [], total: 0, page, pages: 0, courses: [] };
+
+    // Restrict to specific course if provided
+    let courseIds = allCourseIds;
+    if (filters.courseId) {
+      const reqId = new Types.ObjectId(filters.courseId);
+      const owned = allCourseIds.find((id) => id.toString() === reqId.toString());
+      courseIds = owned ? [owned] : [];
+    }
+
+    const filter: any = {
+      status: filters.status && ['paid', 'refunded', 'pending', 'cancelled'].includes(filters.status)
+        ? filters.status
+        : { $in: ['paid', 'refunded'] },
+      'items.courseId': { $in: courseIds },
+    };
+
+    if (filters.dateFrom || filters.dateTo) {
+      filter.createdAt = {};
+      if (filters.dateFrom) filter.createdAt.$gte = new Date(filters.dateFrom);
+      if (filters.dateTo) {
+        const to = new Date(filters.dateTo);
+        to.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = to;
+      }
+    }
 
     const skip = (page - 1) * limit;
-    const filter = { status: { $in: ['paid', 'refunded'] }, 'items.courseId': { $in: courseIds } };
-    const [orders, total] = await Promise.all([
-      this.orderModel
-        .find(filter)
-        .populate('userId', 'name email')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
+    let query = this.orderModel.find(filter).populate('userId', 'name email').sort({ createdAt: -1 });
+
+    // Search by student name/email (post-populate filter)
+    const [allMatching, total] = await Promise.all([
+      query.lean(),
       this.orderModel.countDocuments(filter),
     ]);
 
-    const courseIdSet = new Set(courseIds.map((id) => id.toString()));
-    const ordersFiltered = orders.map((order) => ({
+    const courseIdSet = new Set(allCourseIds.map((id) => id.toString()));
+
+    let results = allMatching.map((order) => ({
       ...order,
       items: order.items.filter((item) => courseIdSet.has(item.courseId.toString())),
       myRevenue: order.status === 'refunded'
@@ -154,7 +187,25 @@ export class InstructorService {
             .reduce((sum, item) => sum + item.price, 0),
     }));
 
-    return { orders: ordersFiltered, total, page, pages: Math.ceil(total / limit) };
+    // Client-side search filter (name/email)
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      results = results.filter((o: any) =>
+        o.userId?.name?.toLowerCase().includes(q) ||
+        o.userId?.email?.toLowerCase().includes(q),
+      );
+    }
+
+    const paginated = results.slice(skip, skip + limit);
+    const realTotal = filters.search ? results.length : total;
+
+    return {
+      orders: paginated,
+      total: realTotal,
+      page,
+      pages: Math.ceil(realTotal / limit),
+      courses: myCourses.map((c: any) => ({ _id: c._id.toString(), title: c.title })),
+    };
   }
 
   // ── Ownership helpers ──────────────────────────────────────────────────────
