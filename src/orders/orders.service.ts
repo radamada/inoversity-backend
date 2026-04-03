@@ -217,8 +217,12 @@ export class OrdersService {
       }
     }
 
+    // Build query without status filter to compute available statuses
+    const queryWithoutStatus = { ...query };
+    delete queryWithoutStatus.status;
+
     const skip = (page - 1) * limit;
-    const [orders, total] = await Promise.all([
+    const [orders, total, availableStatuses] = await Promise.all([
       this.orderModel
         .find(query)
         .populate('userId', 'name email')
@@ -227,8 +231,9 @@ export class OrdersService {
         .limit(limit)
         .exec(),
       this.orderModel.countDocuments(query),
+      this.orderModel.distinct('status', queryWithoutStatus),
     ]);
-    return { orders, total, page, pages: Math.ceil(total / limit) };
+    return { orders, total, page, pages: Math.ceil(total / limit), availableStatuses };
   }
 
   async refund(orderId: string, adminId?: string): Promise<OrderDocument> {

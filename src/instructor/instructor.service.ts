@@ -199,12 +199,16 @@ export class InstructorService {
     const paginated = results.slice(skip, skip + limit);
     const realTotal = filters.search ? results.length : total;
 
+    // Compute available statuses from all matching results (before status filter)
+    const availableStatuses = [...new Set(results.map((o: any) => o.status))];
+
     return {
       orders: paginated,
       total: realTotal,
       page,
       pages: Math.ceil(realTotal / limit),
       courses: myCourses.map((c: any) => ({ _id: c._id.toString(), title: c.title })),
+      availableStatuses,
     };
   }
 
