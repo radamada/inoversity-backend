@@ -116,8 +116,30 @@ class PaginationDto {
   @Type(() => Number)
   @IsNumber()
   @Min(1)
-  @Max(100)
+  @Max(1000)
   limit?: number = 20;
+}
+
+class AdminOrdersQueryDto extends PaginationDto {
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  @IsString()
+  instructorId?: string;
+
+  @IsOptional()
+  @IsString()
+  courseId?: string;
+
+  @IsOptional()
+  @IsString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsString()
+  dateTo?: string;
 }
 
 @ApiTags('Admin')
@@ -186,8 +208,14 @@ export class AdminController {
   // ── Orders ──────────────────────────────────────────────────────────────────
 
   @Get('orders')
-  getOrders(@Query() q: PaginationDto) {
-    return this.adminService.getOrders(q.page ?? 1, q.limit ?? 20);
+  getOrders(@Query() q: AdminOrdersQueryDto) {
+    return this.adminService.getOrders(q.page ?? 1, q.limit ?? 20, {
+      status: q.status,
+      instructorId: q.instructorId,
+      courseId: q.courseId,
+      dateFrom: q.dateFrom,
+      dateTo: q.dateTo,
+    });
   }
 
   @Patch('orders/:id/refund')
@@ -201,6 +229,12 @@ export class AdminController {
   @ApiOperation({ summary: 'Toate cursurile (draft + published)' })
   getAllCourses(@Query() q: PaginationDto) {
     return this.adminService.getAllCourses(q.page ?? 1, q.limit ?? 20);
+  }
+
+  @Get('courses-list')
+  @ApiOperation({ summary: 'Listă simplificată de cursuri pentru filtre (id + title)' })
+  getCoursesList(@Query('instructorId') instructorId?: string) {
+    return this.adminService.getCoursesList(instructorId);
   }
 
   @Get('courses/:id')

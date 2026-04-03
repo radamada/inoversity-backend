@@ -189,17 +189,44 @@ export class OrdersService {
     await this.cartService.clearCart(order.userId.toString());
   }
 
-  async findAll(page = 1, limit = 20) {
+  async findAll(
+    page = 1,
+    limit = 20,
+    filters: {
+      status?: string;
+      courseIds?: Types.ObjectId[];
+      dateFrom?: string;
+      dateTo?: string;
+    } = {},
+  ) {
+    const query: any = {};
+
+    if (filters.status && ['paid', 'refunded', 'pending', 'cancelled'].includes(filters.status)) {
+      query.status = filters.status;
+    }
+    if (filters.courseIds?.length) {
+      query['items.courseId'] = { $in: filters.courseIds };
+    }
+    if (filters.dateFrom || filters.dateTo) {
+      query.createdAt = {};
+      if (filters.dateFrom) query.createdAt.$gte = new Date(filters.dateFrom);
+      if (filters.dateTo) {
+        const to = new Date(filters.dateTo);
+        to.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = to;
+      }
+    }
+
     const skip = (page - 1) * limit;
     const [orders, total] = await Promise.all([
       this.orderModel
-        .find()
+        .find(query)
         .populate('userId', 'name email')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .exec(),
-      this.orderModel.countDocuments(),
+      this.orderModel.countDocuments(query),
     ]);
     return { orders, total, page, pages: Math.ceil(total / limit) };
   }

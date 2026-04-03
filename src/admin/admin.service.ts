@@ -56,8 +56,27 @@ export class AdminService {
     return this.ordersService.getMonthlyRevenue();
   }
 
-  getOrders(page: number, limit: number) {
-    return this.ordersService.findAll(page, limit);
+  async getOrders(
+    page: number,
+    limit: number,
+    filters: { status?: string; instructorId?: string; courseId?: string; dateFrom?: string; dateTo?: string } = {},
+  ) {
+    let courseIds: any[] | undefined;
+    if (filters.instructorId || filters.courseId) {
+      const courseQuery: any = {};
+      if (filters.instructorId) courseQuery.instructorId = filters.instructorId;
+      if (filters.courseId) courseQuery._id = filters.courseId;
+      const courses = await this.courseModel.find(courseQuery).select('_id').lean();
+      courseIds = courses.map((c) => c._id);
+      // If instructor has no courses, return empty
+      if (courseIds.length === 0) return { orders: [], total: 0, page, pages: 0 };
+    }
+    return this.ordersService.findAll(page, limit, {
+      status: filters.status,
+      courseIds,
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+    });
   }
 
   refundOrder(orderId: string, adminId: string) {
@@ -71,6 +90,17 @@ export class AdminService {
       .sort({ name: 1 })
       .lean()
       .exec();
+  }
+
+  async getCoursesList(instructorId?: string) {
+    const query: any = {};
+    if (instructorId) query.instructorId = instructorId;
+    return this.courseModel
+      .find(query)
+      .select('_id title instructorId')
+      .populate('instructorId', 'name')
+      .sort({ title: 1 })
+      .lean();
   }
 
   async getAllCourses(page: number, limit: number) {
