@@ -60,8 +60,8 @@ export class AdminService {
     return this.ordersService.findAll(page, limit);
   }
 
-  refundOrder(orderId: string) {
-    return this.ordersService.refund(orderId);
+  refundOrder(orderId: string, adminId: string) {
+    return this.ordersService.refund(orderId, adminId);
   }
 
   async getInstructors() {

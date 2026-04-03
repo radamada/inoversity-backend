@@ -7,9 +7,10 @@ import {
   MinLength,
   Min,
   MaxLength,
+  IsEnum,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 
 export class CreateCourseDto {
   @ApiProperty({ example: 'Leadership Participativ' })
@@ -28,6 +29,7 @@ export class CreateCourseDto {
   @IsNumber()
   @Min(0)
   @Type(() => Number)
+  @Transform(({ value }) => Math.round(value * 100) / 100)
   price: number;
 
   @ApiPropertyOptional()
@@ -60,12 +62,12 @@ export class CreateCourseDto {
 
   @ApiPropertyOptional({ example: 'beginner' })
   @IsOptional()
-  @IsString()
+  @IsEnum(['beginner', 'intermediate', 'advanced'], { message: 'Nivel invalid. Valori acceptate: beginner, intermediate, advanced' })
   level?: string;
 
   @ApiPropertyOptional({ example: 'ro' })
   @IsOptional()
-  @IsString()
+  @IsEnum(['ro', 'en', 'fr', 'de', 'es', 'it'], { message: 'Limbă invalidă. Valori acceptate: ro, en, fr, de, es, it' })
   language?: string;
 
   @ApiPropertyOptional({ description: 'Admin only: override instructor (MongoDB ObjectId)' })

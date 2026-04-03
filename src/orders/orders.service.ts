@@ -204,11 +204,15 @@ export class OrdersService {
     return { orders, total, page, pages: Math.ceil(total / limit) };
   }
 
-  async refund(orderId: string): Promise<OrderDocument> {
+  async refund(orderId: string, adminId?: string): Promise<OrderDocument> {
     // Atomic status transition: only succeeds if current status is 'paid'
+    const refundedByUpdate: Record<string, any> = { status: 'refunded' };
+    if (adminId) {
+      refundedByUpdate.refundedBy = new Types.ObjectId(adminId);
+    }
     const order = await this.orderModel.findOneAndUpdate(
       { _id: orderId, status: 'paid' },
-      { $set: { status: 'refunded' } },
+      { $set: refundedByUpdate },
       { new: false }, // return original doc so we have stripePaymentIntentId
     );
     if (!order) {

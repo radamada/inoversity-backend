@@ -1,4 +1,4 @@
-import { Body, Controller, Post, HttpCode, HttpStatus } from '@nestjs/common';
+import { Body, Controller, Post, HttpCode, HttpStatus, InternalServerErrorException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { ContactDto } from './contact.dto';
@@ -14,7 +14,11 @@ export class ContactController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Trimite un mesaj de contact' })
   async sendMessage(@Body() dto: ContactDto) {
-    await this.mailService.sendContactEmail(dto);
+    try {
+      await this.mailService.sendContactEmail(dto);
+    } catch {
+      throw new InternalServerErrorException('Nu am putut trimite mesajul. Încearcă din nou.');
+    }
     return { success: true };
   }
 }

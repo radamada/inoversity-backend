@@ -28,8 +28,12 @@ async function bootstrap() {
   const frontendUrl = config.get<string>('FRONTEND_URL', 'http://localhost:3000');
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      // Allow requests with no origin (curl, Swagger, mobile) or any localhost port in dev
-      if (!origin || /^https?:\/\/localhost(:\d+)?$/.test(origin) || origin === frontendUrl) {
+      const isProd = config.get('NODE_ENV') === 'production';
+      // In production: only allow the configured frontend URL
+      // In development: also allow any localhost port (for Swagger, dev servers)
+      if (!origin || origin === frontendUrl) {
+        callback(null, true);
+      } else if (!isProd && /^https?:\/\/localhost(:\d+)?$/.test(origin)) {
         callback(null, true);
       } else {
         callback(new Error(`CORS: origin ${origin} not allowed`));

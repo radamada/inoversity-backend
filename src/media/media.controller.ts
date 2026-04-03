@@ -90,6 +90,7 @@ export class MediaController {
   }
 
   @Get('play-url/:videoId')
+  @Throttle({ default: { ttl: 60000, limit: 30 } })
   @ApiOperation({ summary: 'URL semnat pentru redare video (acces protejat)' })
   getPlayUrl(
     @Param('videoId') videoId: string,
@@ -108,6 +109,7 @@ export class PublicMediaController {
   constructor(private readonly mediaService: MediaService) {}
 
   @Get('preview-url/:videoId')
+  @Throttle({ default: { ttl: 60000, limit: 30 } })
   @ApiOperation({ summary: 'URL semnat pentru preview lecție gratuită (fără autentificare)' })
   async getPreviewUrl(@Param('videoId') videoId: string) {
     const url = await this.mediaService.getPreviewUrlForFreeLesson(videoId);

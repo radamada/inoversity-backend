@@ -24,6 +24,7 @@ import {
   MinLength,
   MaxLength,
   IsEnum,
+  ArrayMaxSize,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -36,6 +37,12 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 import { CreateCourseDto } from '../courses/dto/create-course.dto';
+
+class SaveCurriculumDto {
+  @IsArray()
+  @ArrayMaxSize(500, { message: 'Curriculumul nu poate depăși 500 de elemente' })
+  curriculum: any[];
+}
 
 class SetRoleDto {
   @ApiProperty({ enum: ['student', 'instructor', 'admin'] })
@@ -184,8 +191,8 @@ export class AdminController {
   }
 
   @Patch('orders/:id/refund')
-  refundOrder(@Param('id', ParseObjectIdPipe) id: string) {
-    return this.adminService.refundOrder(id);
+  refundOrder(@Param('id', ParseObjectIdPipe) id: string, @CurrentUser() user: any) {
+    return this.adminService.refundOrder(id, user._id.toString());
   }
 
   // ── Courses ──────────────────────────────────────────────────────────────────
@@ -238,7 +245,7 @@ export class AdminController {
   @ApiOperation({ summary: 'Salvează curriculumul ca modificări în așteptare' })
   savePendingCurriculum(
     @Param('id', ParseObjectIdPipe) id: string,
-    @Body() body: { curriculum: any[] },
+    @Body() body: SaveCurriculumDto,
     @CurrentUser() user: any,
   ) {
     return this.coursesService.savePendingCurriculum(id, body.curriculum, user._id.toString(), true);

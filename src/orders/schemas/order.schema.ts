@@ -46,6 +46,9 @@ export class Order {
 
   @Prop({ type: Number, default: 0 })
   discountAmount: number;
+
+  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  refundedBy: Types.ObjectId | null;
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);

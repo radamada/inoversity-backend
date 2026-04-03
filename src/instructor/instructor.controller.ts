@@ -14,7 +14,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { IsString, IsOptional, IsBoolean, IsNumber, Min, Max, MinLength } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsNumber, Min, Max, MinLength, IsArray, ArrayMaxSize } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { InstructorService } from './instructor.service';
@@ -41,6 +41,12 @@ class PaginationDto {
   @Min(1)
   @Max(100)
   limit?: number = 20;
+}
+
+class SaveCurriculumDto {
+  @IsArray()
+  @ArrayMaxSize(500, { message: 'Curriculumul nu poate depăși 500 de elemente' })
+  curriculum: any[];
 }
 
 class CreateSectionDto {
@@ -171,7 +177,7 @@ export class InstructorController {
   @ApiOperation({ summary: 'Salvează curriculumul ca modificări în așteptare' })
   savePendingCurriculum(
     @Param('id', ParseObjectIdPipe) id: string,
-    @Body() body: { curriculum: any[] },
+    @Body() body: SaveCurriculumDto,
     @CurrentUser() user: any,
   ) {
     return this.coursesService.savePendingCurriculum(id, body.curriculum, user._id.toString(), false);

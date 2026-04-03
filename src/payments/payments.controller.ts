@@ -20,6 +20,7 @@ import { OrdersService } from '../orders/orders.service';
 export class PaymentsController {
   private stripe: Stripe;
   private readonly logger = new Logger(PaymentsController.name);
+  private processedEvents = new Set<string>();
 
   constructor(
     private ordersService: OrdersService,
@@ -59,6 +60,11 @@ export class PaymentsController {
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
+    // Fast-path duplicate check within the same server instance
+    if (this.processedEvents.has(event.id)) {
+      return res.json({ received: true });
+    }
+
     if (event.type === 'payment_intent.succeeded') {
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
       try {
@@ -69,6 +75,7 @@ export class PaymentsController {
       }
     }
 
+    this.processedEvents.add(event.id);
     res.json({ received: true });
   }
 }
