@@ -40,8 +40,8 @@ export class AdminService {
     };
   }
 
-  getUsers(page: number, limit: number) {
-    return this.usersService.findAll(page, limit);
+  getUsers(page: number, limit: number, search?: string) {
+    return this.usersService.findAll(page, limit, search);
   }
 
   setUserRole(id: string, role: string) {
@@ -71,12 +71,45 @@ export class AdminService {
       // If instructor has no courses, return empty
       if (courseIds.length === 0) return { orders: [], total: 0, page, pages: 0 };
     }
-    return this.ordersService.findAll(page, limit, {
+    const result = await this.ordersService.findAll(page, limit, {
       status: filters.status,
       courseIds,
       dateFrom: filters.dateFrom,
       dateTo: filters.dateTo,
     });
+
+    // Enrich items with instructorName
+    const allCourseIds = [
+      ...new Set(
+        result.orders.flatMap((o: any) => o.items.map((i: any) => i.courseId.toString())),
+      ),
+    ];
+    if (allCourseIds.length > 0) {
+      const courseDocs = await this.courseModel
+        .find({ _id: { $in: allCourseIds } })
+        .select('_id instructorId')
+        .populate('instructorId', 'name')
+        .lean();
+      const courseInstructorMap = new Map<string, string>(
+        courseDocs.map((c: any) => [
+          c._id.toString(),
+          c.instructorId?.name ?? '—',
+        ]),
+      );
+      const enrichedOrders = result.orders.map((o: any) => {
+        const plain = o.toObject ? o.toObject() : { ...o };
+        return {
+          ...plain,
+          items: plain.items.map((item: any) => ({
+            ...item,
+            instructorName: courseInstructorMap.get(item.courseId?.toString()) ?? '—',
+          })),
+        };
+      });
+      return { ...result, orders: enrichedOrders };
+    }
+
+    return result;
   }
 
   refundOrder(orderId: string, adminId: string) {

@@ -120,6 +120,12 @@ class PaginationDto {
   limit?: number = 20;
 }
 
+class AdminUsersQueryDto extends PaginationDto {
+  @IsOptional()
+  @IsString()
+  search?: string;
+}
+
 class AdminOrdersQueryDto extends PaginationDto {
   @IsOptional()
   @IsString()
@@ -191,8 +197,8 @@ export class AdminController {
   // ── Users ──────────────────────────────────────────────────────────────────
 
   @Get('users')
-  getUsers(@Query() q: PaginationDto) {
-    return this.adminService.getUsers(q.page ?? 1, q.limit ?? 20);
+  getUsers(@Query() q: AdminUsersQueryDto) {
+    return this.adminService.getUsers(q.page ?? 1, q.limit ?? 20, q.search);
   }
 
   @Patch('users/:id/role')

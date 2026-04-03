@@ -86,11 +86,15 @@ export class UsersService {
     );
   }
 
-  async findAll(page = 1, limit = 20) {
+  async findAll(page = 1, limit = 20, search?: string) {
     const skip = (page - 1) * limit;
+    const query: any = {};
+    if (search && search.trim()) {
+      query.email = { $regex: search.trim(), $options: 'i' };
+    }
     const [users, total] = await Promise.all([
-      this.userModel.find().select('-passwordHash').skip(skip).limit(limit).exec(),
-      this.userModel.countDocuments(),
+      this.userModel.find(query).select('-passwordHash').skip(skip).limit(limit).exec(),
+      this.userModel.countDocuments(query),
     ]);
     return { users, total, page, pages: Math.ceil(total / limit) };
   }
