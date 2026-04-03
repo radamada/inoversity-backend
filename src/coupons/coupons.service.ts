@@ -128,7 +128,7 @@ export class CouponsService {
     instructorSubtotals: Record<string, number> = {},
     coursePrices: Record<string, number> = {},
     userId?: string,
-  ): Promise<number> {
+  ): Promise<{ discountAmount: number; usedAt: Date | null }> {
     const normalizedCode = code.trim().toUpperCase();
     const now = new Date();
 
@@ -158,12 +158,13 @@ export class CouponsService {
         (u) => u.userId.toString() === userId,
       ).length;
       if (userUsageCount > coupon.maxUsesPerUser) {
-        // Roll back: remove the usage entry we just pushed and decrement count
+        // Roll back: pull the exact entry we just pushed (identified by userId + usedAt timestamp)
+        // using $pull with exact match is safe — concurrent entries have different usedAt values
         await this.couponModel.updateOne(
           { code: normalizedCode },
           {
             $inc: { usedCount: -1 },
-            $pop: { usages: 1 },
+            $pull: { usages: { userId: new Types.ObjectId(userId), usedAt: now } },
           },
         );
         throw new BadRequestException('Ai atins limita de utilizări pentru acest cod');
@@ -202,7 +203,10 @@ export class CouponsService {
     // Course-scoped: reduce doar prețul cursului respectiv
     if (coupon.courseId) {
       const coursePrice = coursePrices[coupon.courseId.toString()] ?? 0;
-      return this.calculateDiscount(coupon.discountType, coupon.discountValue, coursePrice);
+      return {
+        discountAmount: this.calculateDiscount(coupon.discountType, coupon.discountValue, coursePrice),
+        usedAt: userId ? now : null,
+      };
     }
 
     // Instructor-scoped: reduce doar subtotalul instructorului
@@ -210,14 +214,23 @@ export class CouponsService {
       ? (instructorSubtotals[coupon.instructorId.toString()] ?? orderTotal)
       : orderTotal;
 
-    return this.calculateDiscount(coupon.discountType, coupon.discountValue, relevantTotal);
+    return {
+      discountAmount: this.calculateDiscount(coupon.discountType, coupon.discountValue, relevantTotal),
+      usedAt: userId ? now : null,
+    };
   }
 
   // ── Internal: rollback a coupon usage if order creation failed ────────────
 
-  async rollbackUsage(code: string, userId?: string): Promise<void> {
+  async rollbackUsage(code: string, userId?: string, usedAt?: Date): Promise<void> {
     const update: Record<string, any> = { $inc: { usedCount: -1 } };
-    if (userId) update.$pop = { usages: 1 };
+    if (userId) {
+      // Pull the exact entry by userId + timestamp — avoids removing other users' entries
+      // ($pop: 1 was wrong: it removes the last element regardless of which user pushed it)
+      const pullFilter: Record<string, any> = { userId: new Types.ObjectId(userId) };
+      if (usedAt) pullFilter.usedAt = usedAt;
+      update.$pull = { usages: pullFilter };
+    }
     await this.couponModel.updateOne(
       { code: code.trim().toUpperCase() },
       update,

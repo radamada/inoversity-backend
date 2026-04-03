@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -17,6 +18,7 @@ import { CouponsService } from '../coupons/coupons.service';
 @Injectable()
 export class OrdersService {
   private stripe: Stripe;
+  private readonly logger = new Logger(OrdersService.name);
 
   constructor(
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
@@ -50,6 +52,7 @@ export class OrdersService {
 
     // Apply coupon server-side — never trust the frontend's discount value
     let discountAmount = 0;
+    let couponUsedAt: Date | null = null;
     let appliedCouponCode: string | null = null;
     if (couponCode && couponCode.trim()) {
       const instructorIds = courses.map((c) => c.instructorId?.toString()).filter(Boolean) as string[];
@@ -60,7 +63,9 @@ export class OrdersService {
         if (instId) instructorSubtotals[instId] = (instructorSubtotals[instId] ?? 0) + course.price;
         coursePrices[course._id.toString()] = course.price;
       }
-      discountAmount = await this.couponsService.applyCoupon(couponCode, subtotal, instructorIds, instructorSubtotals, coursePrices, userId);
+      const result = await this.couponsService.applyCoupon(couponCode, subtotal, instructorIds, instructorSubtotals, coursePrices, userId);
+      discountAmount = result.discountAmount;
+      couponUsedAt = result.usedAt;
       appliedCouponCode = couponCode.trim().toUpperCase();
     }
 
@@ -112,11 +117,11 @@ export class OrdersService {
       });
     } catch (stripeErr: any) {
       if (appliedCouponCode) {
-        await this.couponsService.rollbackUsage(appliedCouponCode, userId);
+        await this.couponsService.rollbackUsage(appliedCouponCode, userId, couponUsedAt ?? undefined);
       }
-      throw new BadRequestException(
-        `Eroare la crearea plății: ${stripeErr?.message ?? 'Eroare Stripe'}`,
-      );
+      // Never leak Stripe error details to the client (may contain card/account info)
+      this.logger.error(`Stripe PaymentIntent error: ${stripeErr?.message}`);
+      throw new BadRequestException('Eroare la procesarea plății. Încearcă din nou.');
     }
 
     const order = new this.orderModel({
@@ -220,9 +225,8 @@ export class OrdersService {
       } catch (stripeErr: any) {
         // Revert DB status — money not returned, don't revoke access
         await this.orderModel.updateOne({ _id: orderId }, { $set: { status: 'paid' } });
-        throw new BadRequestException(
-          `Rambursarea Stripe a eșuat: ${stripeErr?.message ?? 'Eroare necunoscută'}`,
-        );
+        this.logger.error(`Stripe refund error: ${stripeErr?.message}`);
+        throw new BadRequestException('Rambursarea a eșuat. Contactează suportul.');
       }
     }
 
@@ -268,7 +272,8 @@ export class OrdersService {
         if (instId) instructorSubtotals[instId] = (instructorSubtotals[instId] ?? 0) + course.price;
         coursePrices[course._id.toString()] = course.price;
       }
-      discountAmount = await this.couponsService.applyCoupon(couponCode, subtotal, instructorIds, instructorSubtotals, coursePrices, userId);
+      const result = await this.couponsService.applyCoupon(couponCode, subtotal, instructorIds, instructorSubtotals, coursePrices, userId);
+      discountAmount = result.discountAmount;
       appliedCouponCode = couponCode.trim().toUpperCase();
     }
 

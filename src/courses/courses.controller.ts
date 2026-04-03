@@ -10,6 +10,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  NotFoundException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { CoursesService } from './courses.service';
@@ -40,7 +41,10 @@ export class CoursesController {
 
   @Get(':id/curriculum')
   @ApiOperation({ summary: 'Curriculum curs (secțiuni + lecții)' })
-  getCurriculum(@Param('id', ParseObjectIdPipe) id: string) {
+  async getCurriculum(@Param('id', ParseObjectIdPipe) id: string) {
+    // Only expose curriculum for published courses
+    const course = await this.coursesService.findById(id);
+    if (!course.published) throw new NotFoundException('Cursul nu a fost găsit');
     return this.coursesService.getCurriculum(id);
   }
 

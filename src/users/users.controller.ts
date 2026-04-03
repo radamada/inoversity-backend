@@ -60,13 +60,14 @@ export class UsersController {
   @ApiOperation({ summary: 'Upload avatar utilizator pe CDN' })
   async uploadAvatar(@UploadedFile() file: Express.Multer.File, @CurrentUser() user: any) {
     if (!file) throw new BadRequestException('Niciun fișier primit');
-    const allowed = ['image/', 'application/octet-stream']; // unele browsere trimit HEIC ca octet-stream
     const isHeic = file.originalname.toLowerCase().match(/\.(heic|heif)$/);
-    if (!allowed.some((p) => file.mimetype.startsWith(p)) && !isHeic) {
-      throw new BadRequestException('Fișierul trebuie să fie o imagine');
-    }
-    // Normalizăm mimetype-ul pentru HEIC detectat după extensie
+    // Normalize HEIC detected by extension
     if (isHeic && !file.mimetype.startsWith('image/')) file.mimetype = 'image/heic';
+    // Explicit allowlist — SVG is blocked (stored XSS vector via embedded JavaScript)
+    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heic-sequence', 'image/heif', 'application/octet-stream'];
+    if (!allowedMimes.includes(file.mimetype) && !isHeic) {
+      throw new BadRequestException('Format neacceptat. Sunt permise: JPEG, PNG, WebP, GIF, HEIC');
+    }
 
     const newUrl = await this.mediaService.uploadImage(file.buffer, file.originalname, file.mimetype, 'avatars');
 

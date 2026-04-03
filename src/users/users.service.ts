@@ -72,15 +72,18 @@ export class UsersService {
   }
 
   async resetPassword(token: string, newPassword: string): Promise<void> {
-    const user = await this.userModel.findOne({
-      passwordResetToken: token,
-      passwordResetExpires: { $gt: new Date() },
-    });
+    // Atomically consume the token — prevents race-condition double-use
+    const user = await this.userModel.findOneAndUpdate(
+      { passwordResetToken: token, passwordResetExpires: { $gt: new Date() } },
+      { $unset: { passwordResetToken: '', passwordResetExpires: '' } },
+      { new: false }, // return original doc to verify token was found
+    );
     if (!user) throw new NotFoundException('Token invalid sau expirat');
-    user.passwordHash = await bcrypt.hash(newPassword, 12);
-    user.passwordResetToken = null;
-    user.passwordResetExpires = null;
-    await user.save();
+    // Hash and save new password separately (token already consumed above)
+    await this.userModel.updateOne(
+      { _id: user._id },
+      { $set: { passwordHash: await bcrypt.hash(newPassword, 12) } },
+    );
   }
 
   async findAll(page = 1, limit = 20) {

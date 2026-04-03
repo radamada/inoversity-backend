@@ -45,13 +45,19 @@ export class AuthService {
     return this.buildTokenPair(user);
   }
 
+  // Dummy hash used when user is not found — ensures consistent response time
+  // regardless of whether the email exists (prevents timing-based enumeration)
+  private static readonly DUMMY_HASH = '$2b$12$invalidhashpadding000000000000000000000000000000000000000';
+
   async login(dto: LoginDto) {
     const user = await this.usersService.findByEmail(dto.email);
-    if (!user) throw new UnauthorizedException('Email sau parolă incorectă');
-    if (!user.isActive) throw new UnauthorizedException('Contul este dezactivat');
 
-    const valid = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!valid) throw new UnauthorizedException('Email sau parolă incorectă');
+    // Always run bcrypt.compare to normalize response time — prevents account enumeration
+    const hashToCompare = user?.passwordHash ?? AuthService.DUMMY_HASH;
+    const valid = await bcrypt.compare(dto.password, hashToCompare);
+
+    if (!user || !valid) throw new UnauthorizedException('Email sau parolă incorectă');
+    if (!user.isActive) throw new UnauthorizedException('Contul este dezactivat');
 
     return this.buildTokenPair(user);
   }

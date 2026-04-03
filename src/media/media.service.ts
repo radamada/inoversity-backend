@@ -4,7 +4,7 @@ import { Model, Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import * as crypto from 'crypto';
-import { createReadStream, readSync, openSync, closeSync } from 'fs';
+import { createReadStream } from 'fs';
 import { unlink } from 'fs/promises';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const heicConvert = require('heic-convert');
@@ -58,27 +58,32 @@ export class MediaService {
    * Accepts a file from disk (multer diskStorage), streams it to Bunny.net.
    */
   async uploadVideo(file: Express.Multer.File, title: string): Promise<{ videoId: string }> {
-    // 1. Create video entry in Bunny.net
-    const createRes = await axios.post(
-      `${this.baseUrl}/library/${this.libraryId}/videos`,
-      { title: title || file.originalname },
-      { headers: { AccessKey: this.apiKey, 'Content-Type': 'application/json' } },
-    );
-    const videoId: string = createRes.data.guid;
-    const uploadUrl = `${this.baseUrl}/library/${this.libraryId}/videos/${videoId}`;
+    let videoId: string | null = null;
+    try {
+      // 1. Create video entry in Bunny.net
+      const createRes = await axios.post(
+        `${this.baseUrl}/library/${this.libraryId}/videos`,
+        { title: title || file.originalname },
+        { headers: { AccessKey: this.apiKey, 'Content-Type': 'application/json' } },
+      );
+      videoId = createRes.data.guid as string;
+      const uploadUrl = `${this.baseUrl}/library/${this.libraryId}/videos/${videoId}`;
 
-    // 2. Stream file from disk to Bunny.net (low memory footprint)
-    const fileStream = createReadStream(file.path);
-    await axios.put(uploadUrl, fileStream, {
-      headers: { AccessKey: this.apiKey, 'Content-Type': 'application/octet-stream' },
-      maxBodyLength: Infinity,
-      maxContentLength: Infinity,
-    });
+      // 2. Stream file from disk to Bunny.net (low memory footprint)
+      const fileStream = createReadStream(file.path);
+      await axios.put(uploadUrl, fileStream, {
+        headers: { AccessKey: this.apiKey, 'Content-Type': 'application/octet-stream' },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      });
+    } catch {
+      throw new InternalServerErrorException('Eroare la încărcarea videoclipului pe CDN');
+    } finally {
+      // 3. Always remove temp file from disk
+      await unlink(file.path).catch(() => null);
+    }
 
-    // 3. Remove temp file from disk
-    await unlink(file.path).catch(() => null);
-
-    return { videoId };
+    return { videoId: videoId! };
   }
 
   /**
@@ -104,8 +109,10 @@ export class MediaService {
   }
 
   /**
-   * Generate a signed CDN playback URL for a video
-   * Only accessible to enrolled users
+   * Generate a signed CDN playback URL for a video.
+   * Validates:
+   * 1. User is enrolled in the given courseId
+   * 2. The videoId actually belongs to that course (prevents cross-course access)
    */
   async getSignedPlayUrl(
     videoId: string,
@@ -115,6 +122,16 @@ export class MediaService {
     const isEnrolled = await this.enrollmentsService.isEnrolled(userId, courseId);
     if (!isEnrolled) {
       throw new UnauthorizedException('Nu ești înscris la acest curs');
+    }
+
+    // Verify the videoId belongs to the requested course — prevents enrolled user
+    // in course A from requesting signed URLs for videos in course B
+    const lesson = await this.lessonModel.findOne({
+      cdnVideoId: videoId,
+      courseId: new Types.ObjectId(courseId),
+    }).lean();
+    if (!lesson) {
+      throw new ForbiddenException('Videoclipul nu aparține acestui curs');
     }
 
     return this.buildSignedUrl(videoId);
@@ -133,7 +150,7 @@ export class MediaService {
   }
 
   private buildSignedUrl(videoId: string): string {
-    const expiry = Math.floor(Date.now() / 1000) + 4 * 60 * 60; // 4 hours
+    const expiry = Math.floor(Date.now() / 1000) + 1 * 60 * 60; // 1 hour (reduced from 4h)
     const path = `/${videoId}/playlist.m3u8`;
     const hashInput = `${this.tokenKey}${path}${expiry}`;
     const token = crypto
@@ -200,25 +217,39 @@ export class MediaService {
    * Delete an image from Bunny.net Storage by its CDN URL
    */
   async deleteImage(cdnUrl: string): Promise<void> {
-    // Extract the path after the CDN hostname, e.g. "/thumbnails/123-file.png"
     const prefix = this.storageCdnUrl.replace(/\/$/, '');
     if (!cdnUrl.startsWith(prefix)) {
       throw new BadRequestException('URL-ul nu aparține storage-ului configurat');
     }
     const filePath = cdnUrl.slice(prefix.length); // e.g. "/thumbnails/123-file.png"
-    const deleteUrl = `https://storage.bunnycdn.com/${this.storageZoneName}${filePath}`;
-    await axios.delete(deleteUrl, {
-      headers: { AccessKey: this.storageApiKey },
-    });
+
+    // Prevent directory traversal — normalize and verify path stays within CDN root
+    const normalizedPath = filePath.replace(/\\/g, '/').replace(/\/\.\.\//g, '/').replace(/\/\.\.$/, '');
+    if (normalizedPath.includes('..')) {
+      throw new BadRequestException('URL invalid');
+    }
+
+    const deleteUrl = `https://storage.bunnycdn.com/${this.storageZoneName}${normalizedPath}`;
+    try {
+      await axios.delete(deleteUrl, {
+        headers: { AccessKey: this.storageApiKey },
+      });
+    } catch {
+      throw new InternalServerErrorException('Eroare la ștergerea fișierului de pe CDN');
+    }
   }
 
   /**
    * Delete a video from Bunny.net
    */
   async deleteVideo(videoId: string): Promise<void> {
-    await axios.delete(
-      `${this.baseUrl}/library/${this.libraryId}/videos/${videoId}`,
-      { headers: { AccessKey: this.apiKey } },
-    );
+    try {
+      await axios.delete(
+        `${this.baseUrl}/library/${this.libraryId}/videos/${videoId}`,
+        { headers: { AccessKey: this.apiKey } },
+      );
+    } catch {
+      throw new InternalServerErrorException('Eroare la ștergerea videoclipului de pe CDN');
+    }
   }
 }
