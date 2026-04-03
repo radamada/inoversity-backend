@@ -29,8 +29,8 @@ export class CreateCourseDto {
 
   @ApiProperty({ example: 109.99 })
   @IsNumber()
-  @Min(0)
-  @Max(99999, { message: 'Prețul nu poate depăși 99999' })
+  @Min(30, { message: 'Prețul minim este 30 lei' })
+  @Max(2000, { message: 'Prețul maxim este 2000 lei' })
   @Type(() => Number)
   @Transform(({ value }) => Math.round(value * 100) / 100)
   price: number;
