@@ -94,7 +94,7 @@ export class AdminService {
 
   async getCoursesList(instructorId?: string) {
     const query: any = {};
-    if (instructorId) query.instructorId = instructorId;
+    if (instructorId) query.instructorId = new Types.ObjectId(instructorId);
     return this.courseModel
       .find(query)
       .select('_id title instructorId')
