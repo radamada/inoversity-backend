@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsNumber, IsBoolean, Min, Max, MaxLength } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsBoolean, Min, Max, MaxLength, IsIn } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type, Transform } from 'class-transformer';
 
@@ -19,9 +19,9 @@ export class CourseQueryDto {
   @IsString()
   category?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ enum: ['beginner', 'intermediate', 'advanced'] })
   @IsOptional()
-  @IsString()
+  @IsIn(['beginner', 'intermediate', 'advanced'], { message: 'Nivel invalid' })
   level?: string;
 
   @ApiPropertyOptional()
@@ -29,12 +29,15 @@ export class CourseQueryDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @Max(99999)
   minPrice?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
+  @Min(0)
+  @Max(99999)
   maxPrice?: number;
 
   @ApiPropertyOptional()
@@ -45,9 +48,9 @@ export class CourseQueryDto {
   @Max(5)
   minRating?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ enum: ['price_asc', 'price_desc', 'rating', 'newest', 'popular'] })
   @IsOptional()
-  @IsString()
+  @IsIn(['price_asc', 'price_desc', 'rating', 'newest', 'popular'], { message: 'Sortare invalidă' })
   sortBy?: 'price_asc' | 'price_desc' | 'rating' | 'newest' | 'popular';
 
   @ApiPropertyOptional({ default: 1 })

@@ -4,7 +4,7 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
-import { json } from 'express';
+import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { AppLogger } from './common/logger/app.logger';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
@@ -23,6 +23,14 @@ async function bootstrap() {
   // Security
   app.use(helmet());
   app.use(cookieParser());
+
+  // Explicit body size limits — prevent large-payload DoS on non-file endpoints
+  // File uploads are handled by Multer with their own limits
+  app.use((req: any, res: any, next: any) => {
+    if (req.path?.includes('/webhook')) return next(); // Stripe webhook uses rawBody
+    return json({ limit: '1mb' })(req, res, next);
+  });
+  app.use(urlencoded({ extended: false, limit: '1mb' }));
 
   // CORS
   const frontendUrl = config.get<string>('FRONTEND_URL', 'http://localhost:3000');

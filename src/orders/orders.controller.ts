@@ -10,6 +10,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { IsOptional, IsString, MaxLength, Matches } from 'class-validator';
 import { Throttle } from '@nestjs/throttler';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -17,6 +18,14 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
+
+class CreateOrderDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(50, { message: 'Codul de cupon poate avea maxim 50 de caractere' })
+  @Matches(/^[A-Z0-9_-]*$/, { message: 'Cod de cupon invalid' })
+  couponCode?: string;
+}
 
 @ApiTags('Orders')
 @ApiBearerAuth()
@@ -30,9 +39,9 @@ export class OrdersController {
   @Throttle({ default: { ttl: 60000, limit: 10 } })
   createOrder(
     @CurrentUser() user: any,
-    @Body('couponCode') couponCode?: string,
+    @Body() dto: CreateOrderDto,
   ) {
-    return this.ordersService.createOrder(user._id.toString(), couponCode);
+    return this.ordersService.createOrder(user._id.toString(), dto.couponCode);
   }
 
   @Post('fake-pay')
@@ -41,14 +50,14 @@ export class OrdersController {
   @Roles('admin')
   fakePay(
     @CurrentUser() user: any,
-    @Body('couponCode') couponCode?: string,
+    @Body() dto: CreateOrderDto,
   ) {
     // Block in production AND when NODE_ENV is not explicitly 'development'
     // (undefined counts as non-dev to fail secure)
     if (process.env.NODE_ENV !== 'development') {
       throw new ForbiddenException('Endpoint indisponibil în producție');
     }
-    return this.ordersService.createAndPayFake(user._id.toString(), couponCode);
+    return this.ordersService.createAndPayFake(user._id.toString(), dto.couponCode);
   }
 
   @Get()
