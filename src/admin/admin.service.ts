@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { Course, CourseDocument } from '../courses/schemas/course.schema';
 import { Enrollment, EnrollmentDocument } from '../enrollments/schemas/enrollment.schema';
@@ -64,8 +64,8 @@ export class AdminService {
     let courseIds: any[] | undefined;
     if (filters.instructorId || filters.courseId) {
       const courseQuery: any = {};
-      if (filters.instructorId) courseQuery.instructorId = filters.instructorId;
-      if (filters.courseId) courseQuery._id = filters.courseId;
+      if (filters.instructorId) courseQuery.instructorId = new Types.ObjectId(filters.instructorId);
+      if (filters.courseId) courseQuery._id = new Types.ObjectId(filters.courseId);
       const courses = await this.courseModel.find(courseQuery).select('_id').lean();
       courseIds = courses.map((c) => c._id);
       // If instructor has no courses, return empty
