@@ -250,6 +250,14 @@ export class AdminController {
     return this.adminService.setUserRole(id, dto.role, admin._id);
   }
 
+  @Patch('users/:id/revenue-share')
+  setRevenueShare(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() dto: { percent: number },
+  ) {
+    return this.adminService.setRevenueShare(id, dto.percent ?? 0);
+  }
+
   @Patch('users/:id/active')
   setActive(
     @Param('id', ParseObjectIdPipe) id: string,

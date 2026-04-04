@@ -105,8 +105,19 @@ export class UsersService {
   }
 
   async setRole(id: string, role: string): Promise<UserDocument> {
+    const update: any = { $set: { role } };
+    if (role === 'instructor') {
+      // Set default revenue share of 50% only if not already configured
+      const existing = await this.userModel.findById(id).select('revenueSharePercent').lean().exec();
+      if (existing && (existing.revenueSharePercent === 0 || existing.revenueSharePercent == null)) {
+        update.$set.revenueSharePercent = 50;
+      }
+    } else {
+      // Clear revenue share when role is no longer instructor
+      update.$unset = { revenueSharePercent: '' };
+    }
     const user = await this.userModel
-      .findByIdAndUpdate(id, { role }, { new: true })
+      .findByIdAndUpdate(id, update, { new: true })
       .exec();
     if (!user) throw new NotFoundException('Utilizatorul nu a fost găsit');
     return user;

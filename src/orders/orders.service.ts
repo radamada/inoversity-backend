@@ -14,6 +14,7 @@ import { CartService } from '../cart/cart.service';
 import { EnrollmentsService } from '../enrollments/enrollments.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CouponsService } from '../coupons/coupons.service';
+import { WishlistService } from '../wishlist/wishlist.service';
 
 @Injectable()
 export class OrdersService {
@@ -27,6 +28,7 @@ export class OrdersService {
     private enrollmentsService: EnrollmentsService,
     private notificationsService: NotificationsService,
     private couponsService: CouponsService,
+    private wishlistService: WishlistService,
     private config: ConfigService,
   ) {
     this.stripe = new Stripe(this.config.get<string>('STRIPE_SECRET_KEY') ?? '', {
@@ -128,6 +130,7 @@ export class OrdersService {
         `Ai dobândit acces la ${order.items.length === 1 ? 'cursul' : 'cursurile'} ${courseNames}. Mult succes la învățat!`,
       );
       await this.cartService.clearCart(userId);
+      await this.wishlistService.removePurchasedCourses(userId, order.items.map((i) => i.courseId.toString()));
 
       return {
         orderId: order._id,
@@ -220,6 +223,12 @@ export class OrdersService {
 
     // Clear cart
     await this.cartService.clearCart(order.userId.toString());
+
+    // Remove purchased courses from wishlist
+    await this.wishlistService.removePurchasedCourses(
+      order.userId.toString(),
+      order.items.map((i) => i.courseId.toString()),
+    );
   }
 
   async findAll(
@@ -383,6 +392,7 @@ export class OrdersService {
     );
 
     await this.cartService.clearCart(userId);
+    await this.wishlistService.removePurchasedCourses(userId, order.items.map((i) => i.courseId.toString()));
 
     return { orderId: order._id, total, discountAmount: Math.round(discountAmount * 100) / 100, subtotal };
   }

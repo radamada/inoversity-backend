@@ -67,6 +67,17 @@ export class WishlistService {
     return count > 0;
   }
 
+  async removePurchasedCourses(userId: string, courseIds: string[]): Promise<void> {
+    if (!courseIds.length) return;
+    const objectIds = courseIds
+      .filter((id) => Types.ObjectId.isValid(id))
+      .map((id) => new Types.ObjectId(id));
+    await this.wishlistModel.deleteMany({
+      userId: new Types.ObjectId(userId),
+      courseId: { $in: objectIds },
+    });
+  }
+
   async getWishlistCourseIds(userId: string): Promise<string[]> {
     const items = await this.wishlistModel
       .find({ userId: new Types.ObjectId(userId) })

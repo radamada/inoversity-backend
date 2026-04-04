@@ -58,6 +58,15 @@ export class AdminService {
     return this.usersService.setActive(id, isActive);
   }
 
+  setRevenueShare(id: string, percent: number) {
+    const clamped = Math.min(100, Math.max(0, Math.round(percent)));
+    return this.userModel.findByIdAndUpdate(
+      id,
+      { $set: { revenueSharePercent: clamped } },
+      { new: true },
+    ).select('-passwordHash').lean();
+  }
+
   getMonthlyRevenue() {
     return this.ordersService.getMonthlyRevenue();
   }

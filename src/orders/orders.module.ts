@@ -8,6 +8,7 @@ import { CartModule } from '../cart/cart.module';
 import { EnrollmentsModule } from '../enrollments/enrollments.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { CouponsModule } from '../coupons/coupons.module';
+import { WishlistModule } from '../wishlist/wishlist.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { CouponsModule } from '../coupons/coupons.module';
     EnrollmentsModule,
     NotificationsModule,
     CouponsModule,
+    WishlistModule,
   ],
   providers: [OrdersService],
   controllers: [OrdersController],

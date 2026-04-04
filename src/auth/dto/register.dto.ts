@@ -8,8 +8,11 @@ export class RegisterDto {
 
   @ApiProperty({ example: 'Ion Popescu' })
   @IsString()
-  @MinLength(2)
-  @MaxLength(100)
+  @MinLength(2, { message: 'Numele trebuie să aibă minim 2 caractere' })
+  @MaxLength(50, { message: 'Numele poate avea maxim 50 de caractere' })
+  @Matches(/^[A-Za-zÀ-ÖØ-öø-ÿăîâșțĂÎÂȘȚ]+([- ][A-Za-zÀ-ÖØ-öø-ÿăîâșțĂÎÂȘȚ]+)*$/, {
+    message: 'Numele poate conține doar litere, spații și cratimă (ex: Ion Popescu, Maria-Ioana)',
+  })
   name: string;
 
   @ApiProperty({ example: 'parola123' })

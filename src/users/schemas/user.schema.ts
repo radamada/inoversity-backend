@@ -50,6 +50,10 @@ export class User {
   /** Incremented on logout to invalidate all existing refresh tokens */
   @Prop({ default: 0 })
   tokenVersion: number;
+
+  /** Percentage of course revenue the instructor pays to the platform (0-100) */
+  @Prop({ type: Number, default: 0, min: 0, max: 100 })
+  revenueSharePercent: number;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
