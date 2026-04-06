@@ -21,11 +21,15 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { WishlistModule } from './wishlist/wishlist.module';
 import { CouponsModule } from './coupons/coupons.module';
 import { NotesModule } from './notes/notes.module';
+import { AppCacheModule } from './common/cache/app-cache.module';
 
 @Module({
   imports: [
     // Config
     ConfigModule.forRoot({ isGlobal: true }),
+
+    // In-memory cache (global)
+    AppCacheModule,
 
     // Rate limiting
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),

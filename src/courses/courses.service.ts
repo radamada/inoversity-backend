@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -19,6 +20,7 @@ import { CreateCourseDto } from './dto/create-course.dto';
 import { CourseQueryDto } from './dto/course-query.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MediaService } from '../media/media.service';
+import { AppCacheService } from '../common/cache/app-cache.service';
 
 @Injectable()
 export class CoursesService {
@@ -33,11 +35,39 @@ export class CoursesService {
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     private notificationsService: NotificationsService,
     private mediaService: MediaService,
+    private appCache: AppCacheService,
   ) {}
+
+  // ── Cache invalidation ───────────────────────────────────────────────────
+
+  /** Invalidate all course-related caches. Called on any course mutation. */
+  private async invalidateCourseCache(slug?: string): Promise<void> {
+    await Promise.all([
+      this.appCache.invalidateByPrefix('courses:list:'),
+      this.appCache.invalidateByPrefix('courses:also-bought:'),
+      slug
+        ? this.appCache.del(`courses:slug:${slug}`)
+        : this.appCache.invalidateByPrefix('courses:slug:'),
+    ]);
+  }
+
+  /** Invalidate curriculum cache for a specific course. */
+  private async invalidateCurriculumCache(courseId: string): Promise<void> {
+    await this.appCache.del(`courses:curriculum:${courseId}`);
+  }
 
   // ── Courses ──────────────────────────────────────────────────────────────
 
   async findAll(query: CourseQueryDto, onlyPublished = true) {
+    // Cache only public (non-admin) course listings
+    const cacheKey = onlyPublished
+      ? `courses:list:${JSON.stringify(query)}`
+      : null;
+    if (cacheKey) {
+      const cached = await this.appCache.get(cacheKey);
+      if (cached) return cached;
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filter: Record<string, any> = {};
     if (onlyPublished) filter.published = true;
@@ -84,16 +114,24 @@ export class CoursesService {
       this.courseModel.countDocuments(filter),
     ]);
 
-    return { courses, total, page, pages: Math.ceil(total / limit) };
+    const result = { courses, total, page, pages: Math.ceil(total / limit) };
+    if (cacheKey) await this.appCache.set(cacheKey, result, 300_000); // 5 min
+    return result;
   }
 
   async findBySlug(slug: string): Promise<CourseDocument> {
+    const cacheKey = `courses:slug:${slug}`;
+    const cached = await this.appCache.get<CourseDocument>(cacheKey);
+    if (cached) return cached;
+
     const course = await this.courseModel
       .findOne({ slug, published: true })
       .populate('instructorId', 'name avatar')
       .populate('categoryId', 'name slug')
       .exec();
     if (!course) throw new NotFoundException('Cursul nu a fost găsit');
+
+    await this.appCache.set(cacheKey, course, 300_000); // 5 min
     return course;
   }
 
@@ -108,6 +146,13 @@ export class CoursesService {
   }
 
   async create(dto: CreateCourseDto, instructorId: string): Promise<CourseDocument> {
+    const existing = await this.courseModel.findOne({
+      title: { $regex: new RegExp(`^${dto.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+    });
+    if (existing) {
+      throw new ConflictException('Există deja un curs cu acest titlu');
+    }
+
     const slug = await this.generateUniqueSlug(dto.title);
     const course = new this.courseModel({
       ...dto,
@@ -116,12 +161,15 @@ export class CoursesService {
       categoryId: dto.categoryId ? new Types.ObjectId(dto.categoryId) : null,
     });
     try {
-      return await course.save();
+      const saved = await course.save();
+      await this.invalidateCourseCache();
+      return saved;
     } catch (err: any) {
       if (err?.code === 11000 && err?.keyPattern?.slug) {
-        // Slug collision under concurrency — append random suffix and retry once
         course.slug = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
-        return course.save();
+        const saved = await course.save();
+        await this.invalidateCourseCache();
+        return saved;
       }
       throw err;
     }
@@ -149,6 +197,7 @@ export class CoursesService {
         .populate('categoryId', 'name slug')
         .exec();
       if (!updated) throw new NotFoundException('Cursul nu a fost găsit');
+      await this.invalidateCourseCache(updated.slug);
       return updated;
     }
 
@@ -159,6 +208,7 @@ export class CoursesService {
       .populate('categoryId', 'name slug')
       .exec();
     if (!updated) throw new NotFoundException('Cursul nu a fost găsit');
+    await this.invalidateCourseCache(updated.slug);
     return updated;
   }
 
@@ -277,6 +327,11 @@ export class CoursesService {
       .populate('categoryId', 'name slug')
       .exec();
     if (!updated) throw new NotFoundException('Cursul nu a fost găsit');
+
+    await Promise.all([
+      this.invalidateCourseCache(updated.slug),
+      this.invalidateCurriculumCache(id),
+    ]);
 
     // Notify enrolled users only after the new version is live
     await this.notificationsService.notifyEnrolledUsers(
@@ -418,10 +473,16 @@ export class CoursesService {
   }
 
   async togglePublish(id: string): Promise<CourseDocument> {
-    const course = await this.findById(id);
+    const course = await this.courseModel
+      .findById(id)
+      .populate('instructorId', 'name avatar')
+      .populate('categoryId', 'name slug')
+      .exec();
+    if (!course) throw new NotFoundException('Cursul nu a fost găsit');
     const wasPublished = course.published;
     course.published = !course.published;
     const saved = await course.save();
+    await this.invalidateCourseCache(saved.slug);
 
     if (wasPublished && !saved.published) {
       // Scos din publicare: curăță wishlist-uri + notifică studenți înscriși
@@ -469,6 +530,10 @@ export class CoursesService {
   }
 
   async getAlsoBought(courseId: string, limit = 4): Promise<CourseDocument[]> {
+    const cacheKey = `courses:also-bought:${courseId}`;
+    const cached = await this.appCache.get<CourseDocument[]>(cacheKey);
+    if (cached) return cached;
+
     const objId = new Types.ObjectId(courseId);
 
     const result = await this.orderModel.aggregate([
@@ -483,11 +548,14 @@ export class CoursesService {
     const ids = result.map((r) => r._id);
     if (!ids.length) return [];
 
-    return this.courseModel
+    const courses = await this.courseModel
       .find({ _id: { $in: ids }, published: true })
       .select('title slug thumbnail price rating reviewCount instructorId')
       .populate('instructorId', 'name')
-      .lean() as any;
+      .lean();
+
+    await this.appCache.set(cacheKey, courses, 900_000); // 15 min
+    return courses as any;
   }
 
   async delete(id: string): Promise<void> {
@@ -545,6 +613,10 @@ export class CoursesService {
     }
 
     await this.courseModel.findByIdAndDelete(courseId);
+    await Promise.all([
+      this.invalidateCourseCache(),
+      this.invalidateCurriculumCache(courseId.toString()),
+    ]);
   }
 
   private async cleanWishlistAndNotify(courseId: string, courseTitle: string): Promise<void> {
@@ -636,6 +708,13 @@ export class CoursesService {
   }
 
   async getCurriculum(courseId: string, includeCorrectAnswers = false) {
+    // Cache only public curriculum (without correct answers)
+    const cacheKey = !includeCorrectAnswers ? `courses:curriculum:${courseId}` : null;
+    if (cacheKey) {
+      const cached = await this.appCache.get(cacheKey);
+      if (cached) return cached;
+    }
+
     const cid = new Types.ObjectId(courseId);
     const sections = await this.sectionModel
       .find({ courseId: cid })
@@ -660,12 +739,15 @@ export class CoursesService {
           };
         });
 
-    return sections.map((section) => ({
+    const curriculum = sections.map((section) => ({
       ...section,
       lessons: sanitizedLessons.filter(
         (l) => l.sectionId.toString() === (section as any)._id.toString(),
       ),
     }));
+
+    if (cacheKey) await this.appCache.set(cacheKey, curriculum, 300_000); // 5 min
+    return curriculum;
   }
 
   async getLessonCounts(courseIds: string[]): Promise<Record<string, number>> {
@@ -724,6 +806,7 @@ export class CoursesService {
         rating: Math.round(result[0].avg * 10) / 10,
         reviewCount: result[0].count,
       });
+      await this.invalidateCourseCache();
     }
   }
 
