@@ -5,10 +5,22 @@ import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { json, urlencoded } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
 import { AppLogger } from './common/logger/app.logger';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+
+/** Attach a short unique ID to every request for log correlation.
+ *  Honours a client-supplied X-Request-ID header (e.g. from a reverse proxy). */
+let _reqCounter = 0;
+function requestIdMiddleware(req: Request, res: Response, next: NextFunction) {
+  const incoming = req.headers['x-request-id'] as string | undefined;
+  const id = incoming ?? `r${(++_reqCounter).toString(36)}`;
+  req.headers['x-request-id'] = id;
+  res.setHeader('X-Request-ID', id);
+  next();
+}
 
 async function bootstrap() {
   const logger = new AppLogger();
@@ -19,6 +31,9 @@ async function bootstrap() {
   app.useGlobalInterceptors(new LoggingInterceptor());
   app.useGlobalFilters(new AllExceptionsFilter());
   const config = app.get(ConfigService);
+
+  // Request ID — must be first so all subsequent middleware/interceptors see it
+  app.use(requestIdMiddleware);
 
   // Security
   app.use(helmet());

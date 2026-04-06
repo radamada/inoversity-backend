@@ -4,13 +4,11 @@ import {
   Get,
   Body,
   Res,
-  Req,
   UseGuards,
   HttpCode,
   HttpStatus,
   Param,
   UnauthorizedException,
-  Redirect,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -23,6 +21,13 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthGuard } from '@nestjs/passport';
 import { Throttle } from '@nestjs/throttler';
+import {
+  COOKIE_NAMES,
+  REFRESH_COOKIE_OPTIONS,
+  REFRESH_COOKIE_CLEAR_OPTIONS,
+  ROLE_COOKIE_OPTIONS,
+  ROLE_COOKIE_CLEAR_OPTIONS,
+} from './cookie-names.const';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -60,16 +65,14 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Șterge cookies de sesiune (fără autentificare)' })
   clearSession(@Res({ passthrough: true }) res: Response) {
-    res.clearCookie('refresh_token', { path: '/api/auth/refresh' });
-    res.clearCookie('user_role');
+    this.clearAuthCookies(res);
     return { ok: true };
   }
 
   @Get('clear-session')
   @HttpCode(HttpStatus.OK)
   clearSessionGet(@Res() res: Response) {
-    (res as any).clearCookie('refresh_token', { path: '/api/auth/refresh' });
-    (res as any).clearCookie('user_role');
+    this.clearAuthCookies(res as any);
     const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
     (res as any).redirect(`${frontendUrl}/login`);
   }
@@ -87,8 +90,7 @@ export class AuthController {
       this.setRefreshCookie(res, result.refreshToken);
       return { accessToken: result.accessToken };
     } catch {
-      res.clearCookie('refresh_token', { path: '/api/auth/refresh' });
-      res.clearCookie('user_role');
+      this.clearAuthCookies(res);
       throw new UnauthorizedException('Sesiune expirată');
     }
   }
@@ -98,12 +100,10 @@ export class AuthController {
   @UseGuards(AuthGuard('jwt-refresh'))
   @ApiOperation({ summary: 'Delogare' })
   async logout(@CurrentUser() user: any, @Res({ passthrough: true }) res: Response) {
-    // Increment tokenVersion to invalidate all existing refresh tokens for this user
     if (user?.sub) {
       await this.authService.logout(user.sub);
     }
-    res.clearCookie('refresh_token', { path: '/api/auth/refresh' });
-    res.clearCookie('user_role');
+    this.clearAuthCookies(res);
     return { message: 'Delogat cu succes' };
   }
 
@@ -131,23 +131,32 @@ export class AuthController {
     return { message: 'Parola a fost resetată cu succes' };
   }
 
-  private setRefreshCookie(res: Response, token: string) {
-    res.cookie('refresh_token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/api/auth/refresh',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+  // ── Private helpers ────────────────────────────────────────────────────────
+
+  private setRefreshCookie(res: Response, token: string): void {
+    res.cookie(COOKIE_NAMES.refreshToken, token, REFRESH_COOKIE_OPTIONS);
   }
 
-  private setRoleCookie(res: Response, role: string) {
-    res.cookie('user_role', role, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+  private setRoleCookie(res: Response, role: string): void {
+    res.cookie(COOKIE_NAMES.userRole, role, ROLE_COOKIE_OPTIONS);
+  }
+
+  /**
+   * Clears both auth cookies.
+   * Also clears the old plain names (without __Host- prefix) during the
+   * transition period so lingering dev/pre-deploy sessions are cleaned up.
+   */
+  private clearAuthCookies(res: Response): void {
+    res.clearCookie(COOKIE_NAMES.refreshToken, REFRESH_COOKIE_CLEAR_OPTIONS);
+    res.clearCookie(COOKIE_NAMES.userRole, ROLE_COOKIE_CLEAR_OPTIONS);
+    // Safety net: also clear legacy plain names if they differ (prod with __Host- prefix)
+    if (COOKIE_NAMES.refreshToken !== 'refresh_token') {
+      res.clearCookie('refresh_token', { path: '/api/auth/refresh' });
+      res.clearCookie('refresh_token', { path: '/' });
+    }
+    if (COOKIE_NAMES.userRole !== 'user_role') {
+      res.clearCookie('user_role', { path: '/' });
+    }
   }
 
   private sanitizeUser(user: any) {

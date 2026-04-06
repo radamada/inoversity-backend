@@ -4,6 +4,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../../users/users.service';
 import type { Request } from 'express';
+import { COOKIE_NAMES } from '../cookie-names.const';
 
 @Injectable()
 export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
@@ -13,7 +14,7 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
-        (req: any) => req?.cookies?.['refresh_token'] ?? null,
+        (req: any) => req?.cookies?.[COOKIE_NAMES.refreshToken] ?? null,
       ]),
       ignoreExpiration: false,
       secretOrKey: config.get<string>('JWT_REFRESH_SECRET') ?? (() => { throw new Error('JWT_REFRESH_SECRET env var is not set'); })(),
@@ -22,7 +23,7 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
   }
 
   async validate(req: Request, payload: { sub: string; email: string; role: string; tokenVersion?: number }) {
-    const token = (req as any).cookies?.['refresh_token'];
+    const token = (req as any).cookies?.[COOKIE_NAMES.refreshToken];
     if (!token) throw new UnauthorizedException();
 
     const user = await this.usersService.findById(payload.sub);

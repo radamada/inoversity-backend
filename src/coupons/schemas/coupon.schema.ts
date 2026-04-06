@@ -59,4 +59,4 @@ export class Coupon {
 }
 
 export const CouponSchema = SchemaFactory.createForClass(Coupon);
-CouponSchema.index({ code: 1 }, { unique: true });
+// Index on `code` is already created by `unique: true` in @Prop above — no duplicate needed.

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { join } from 'path';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -13,6 +13,7 @@ import { Course, CourseDocument } from '../courses/schemas/course.schema';
 
 @Injectable()
 export class EnrollmentsService {
+  private readonly logger = new Logger(EnrollmentsService.name);
   constructor(
     @InjectModel(Enrollment.name) private enrollmentModel: Model<EnrollmentDocument>,
     @InjectModel(Lesson.name) private lessonModel: Model<LessonDocument>,
@@ -356,7 +357,7 @@ export class EnrollmentsService {
     });
 
     if (!process.env.FRONTEND_URL) {
-      console.warn('[Certificate] FRONTEND_URL env var is not set — verify URL will use localhost fallback');
+      this.logger.warn('FRONTEND_URL env var is not set — certificate verify URL will use localhost fallback');
     }
     const code = enrollment.verificationCode ?? enrollment._id.toString();
     const verifyUrl = `${process.env.FRONTEND_URL ?? 'http://localhost:3000'}/verify-certificate/${code}`;
