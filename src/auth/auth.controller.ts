@@ -4,6 +4,7 @@ import {
   Get,
   Body,
   Res,
+  Req,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -75,6 +76,49 @@ export class AuthController {
     this.clearAuthCookies(res as any);
     const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
     (res as any).redirect(`${frontendUrl}/login`);
+  }
+
+  // ── Google OAuth ──────────────────────────────────────────────────────────
+
+  /**
+   * Initiate Google OAuth flow.
+   * Frontend navigates to: GET /api/auth/google
+   * Optional query param ?from=/some-path is stored in sessionStorage by the
+   * frontend before navigating here, so it survives the OAuth round-trip.
+   */
+  @Get('google')
+  @UseGuards(AuthGuard('google'))
+  googleAuth() {
+    // Passport redirects to Google — nothing to return here
+  }
+
+  /**
+   * Google redirects back here after the user consents.
+   * Sets cookies and redirects the browser to the frontend callback page
+   * which reads the one-time access token from the URL and stores it in memory.
+   */
+  @Get('google/callback')
+  @UseGuards(AuthGuard('google'))
+  async googleCallback(@Req() req: any, @Res() res: Response) {
+    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+
+    if (!req.user) {
+      return (res as any).redirect(`${frontendUrl}/login?error=google_failed`);
+    }
+
+    try {
+      const result = await this.authService.loginWithGoogle(req.user);
+      this.setRefreshCookie(res, result.refreshToken);
+      this.setRoleCookie(res, result.user.role);
+      // Pass access token to frontend via URL — the callback page reads it
+      // immediately and removes it from the URL (replaceState) so it never
+      // sits in browser history.
+      (res as any).redirect(
+        `${frontendUrl}/auth/google/callback?token=${result.accessToken}`,
+      );
+    } catch {
+      (res as any).redirect(`${frontendUrl}/login?error=google_failed`);
+    }
   }
 
   @Post('refresh')

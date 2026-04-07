@@ -62,6 +62,12 @@ export class AuthService {
     return this.buildTokenPair(user);
   }
 
+  /** Used by Google OAuth callback — skips password validation */
+  async loginWithGoogle(user: UserDocument) {
+    if (!user.isActive) throw new UnauthorizedException('Contul este dezactivat');
+    return this.buildTokenPair(user);
+  }
+
   async refresh(userId: string, email: string, role: string, tokenVersion: number) {
     return this.buildTokenPair({ _id: userId, email, role, tokenVersion } as any);
   }

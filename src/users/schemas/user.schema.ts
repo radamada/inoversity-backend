@@ -8,8 +8,9 @@ export class User {
   @Prop({ required: true, unique: true, lowercase: true, trim: true })
   email: string;
 
-  @Prop({ required: true, select: false })
-  passwordHash: string;
+  /** null for OAuth-only accounts (e.g. Google sign-in) */
+  @Prop({ type: String, required: false, select: false, default: null })
+  passwordHash: string | null;
 
   @Prop({ required: true, trim: true })
   name: string;
@@ -47,6 +48,10 @@ export class User {
   @Prop({ default: false })
   darkMode: boolean;
 
+  /** Google OAuth ID — null for email+password accounts */
+  @Prop({ type: String, required: false, default: null })
+  googleId: string | null;
+
   /** Incremented on logout to invalidate all existing refresh tokens */
   @Prop({ default: 0 })
   tokenVersion: number;
@@ -58,3 +63,4 @@ export class User {
 
 export const UserSchema = SchemaFactory.createForClass(User);
 UserSchema.index({ passwordResetToken: 1 }, { sparse: true });
+UserSchema.index({ googleId: 1 }, { sparse: true, unique: true });

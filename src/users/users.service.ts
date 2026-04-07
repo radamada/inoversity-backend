@@ -57,11 +57,53 @@ export class UsersService {
   async changePassword(id: string, dto: ChangePasswordDto): Promise<{ message: string }> {
     const user = await this.userModel.findById(id).select('+passwordHash').exec();
     if (!user) throw new NotFoundException('Utilizatorul nu a fost găsit');
+    if (!user.passwordHash) {
+      throw new BadRequestException(
+        'Contul tău este conectat prin Google și nu are o parolă setată.',
+      );
+    }
     const valid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
     if (!valid) throw new UnauthorizedException('Parola curentă este incorectă');
     user.passwordHash = await bcrypt.hash(dto.newPassword, 12);
     await user.save();
     return { message: 'Parola a fost schimbată cu succes' };
+  }
+
+  /**
+   * Finds an existing user by Google ID, or by email (account linking),
+   * or creates a new user for first-time Google sign-in.
+   */
+  async findOrCreateGoogleUser(dto: {
+    googleId: string;
+    email: string;
+    name: string;
+    avatar?: string;
+  }): Promise<UserDocument> {
+    // 1. Existing Google account
+    const byGoogleId = await this.userModel.findOne({ googleId: dto.googleId }).exec();
+    if (byGoogleId) return byGoogleId;
+
+    // 2. Existing email+password account → link Google to it
+    const byEmail = await this.userModel
+      .findOne({ email: dto.email.toLowerCase() })
+      .exec();
+    if (byEmail) {
+      byEmail.googleId = dto.googleId;
+      if (!byEmail.avatar && dto.avatar) byEmail.avatar = dto.avatar;
+      return byEmail.save();
+    }
+
+    // 3. Brand-new user via Google
+    return this.userModel.create({
+      email: dto.email.toLowerCase(),
+      name: dto.name,
+      googleId: dto.googleId,
+      passwordHash: null,
+      avatar: dto.avatar ?? '',
+      emailVerified: true,   // Google guarantees email ownership
+      termsAccepted: true,
+      termsAcceptedAt: new Date(),
+    });
   }
 
   async setPasswordResetToken(email: string, token: string, expires: Date): Promise<void> {
