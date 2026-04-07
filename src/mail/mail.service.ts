@@ -64,6 +64,45 @@ export class MailService {
     }
   }
 
+  async sendGoogleAccountNotice(to: string): Promise<void> {
+    const from = this.config.get('SMTP_FROM', 'EduInovatrium <noreply@eduinovatrium.ro>');
+    const frontendUrl = this.config.get('FRONTEND_URL', 'http://localhost:3000');
+    const loginUrl = `${frontendUrl}/login`;
+
+    try {
+      await this.transporter.sendMail({
+        from,
+        to,
+        subject: 'Cont EduInovatrium — autentificare cu Google',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background: linear-gradient(135deg, #4f46e5, #3730a3); padding: 32px; border-radius: 8px 8px 0 0;">
+              <h1 style="color: white; margin: 0; font-size: 24px;">EduInovatrium</h1>
+            </div>
+            <div style="background: #f9fafb; padding: 32px; border-radius: 0 0 8px 8px; border: 1px solid #e5e7eb; border-top: none;">
+              <h2 style="color: #111827; margin-top: 0;">Ai solicitat resetarea parolei</h2>
+              <p style="color: #6b7280;">
+                Contul tău EduInovatrium este conectat prin <strong>Google</strong> și nu are o parolă setată.
+                Nu trebuie să îți resetezi parola — poți intra direct folosind butonul de mai jos.
+              </p>
+              <div style="text-align: center; margin: 32px 0;">
+                <a href="${loginUrl}"
+                   style="background: #4f46e5; color: white; padding: 12px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block;">
+                  Intră cu Google
+                </a>
+              </div>
+              <p style="color: #9ca3af; font-size: 14px;">
+                Dacă nu ai solicitat tu acest lucru, poți ignora acest email — contul tău este în siguranță.
+              </p>
+            </div>
+          </div>
+        `,
+      });
+    } catch (err) {
+      this.logger.error('Failed to send Google account notice email', err);
+    }
+  }
+
   async sendWelcome(to: string, name: string): Promise<void> {
     const from = this.config.get('SMTP_FROM', 'EduInovatrium <noreply@eduinovatrium.ro>');
     const frontendUrl = this.config.get('FRONTEND_URL', 'http://localhost:3000');

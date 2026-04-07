@@ -77,6 +77,14 @@ export class AuthService {
   }
 
   async forgotPassword(email: string): Promise<void> {
+    const user = await this.usersService.findByEmail(email);
+
+    // Google-only account (no passwordHash) — send a notice instead of a reset link
+    if (user && user.googleId && !user.passwordHash) {
+      this.mailService.sendGoogleAccountNotice(email).catch(() => null);
+      return;
+    }
+
     const token = crypto.randomBytes(32).toString('hex');
     const expires = new Date(Date.now() + 1 * 60 * 60 * 1000); // 1 hour
     await this.usersService.setPasswordResetToken(email, token, expires);
