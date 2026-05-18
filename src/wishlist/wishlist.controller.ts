@@ -38,6 +38,7 @@ export class WishlistController {
   }
 
   @Delete(':courseId')
+  @Throttle({ default: { ttl: 60000, limit: 30 } })
   @HttpCode(HttpStatus.NO_CONTENT)
   removeFromWishlist(
     @CurrentUser() user: any,

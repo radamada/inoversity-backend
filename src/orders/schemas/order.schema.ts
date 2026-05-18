@@ -30,7 +30,7 @@ export class Order {
   total: number;
 
   @Prop({
-    enum: ['pending', 'paid', 'refunded', 'cancelled'],
+    enum: ['pending', 'confirming', 'paid', 'refunded', 'cancelled'],
     default: 'pending',
   })
   status: string;
@@ -44,6 +44,12 @@ export class Order {
   @Prop({ type: String, default: null })
   couponCode: string | null;
 
+  // Timestamp of the exact `usages` entry pushed when this order applied the coupon.
+  // Required at refund time so we $pull the correct entry (without it, $pull would
+  // remove ALL the user's usages of this coupon, corrupting per-user limits).
+  @Prop({ type: Date, default: null })
+  couponUsedAt: Date | null;
+
   @Prop({ type: Number, default: 0 })
   discountAmount: number;
 
@@ -54,3 +60,6 @@ export class Order {
 export const OrderSchema = SchemaFactory.createForClass(Order);
 OrderSchema.index({ userId: 1, createdAt: -1 });
 OrderSchema.index({ stripePaymentIntentId: 1 }, { sparse: true });
+// Cron job indexes: recoverStuckConfirmingOrders + cancelAbandonedOrders
+OrderSchema.index({ status: 1, updatedAt: -1 });
+OrderSchema.index({ status: 1, createdAt: -1 });

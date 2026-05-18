@@ -21,8 +21,7 @@ import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 
 class SubmitQuizDto {
   @IsArray()
-  @IsNumber({}, { each: true })
-  answers: number[];
+  answers: number[][];
 }
 
 @ApiTags('Enrollments')
@@ -49,6 +48,7 @@ export class EnrollmentsController {
   }
 
   @Get(':courseId/certificate')
+  @Throttle({ default: { ttl: 60_000, limit: 3 } })
   async getCertificate(
     @CurrentUser() user: any,
     @Param('courseId', ParseObjectIdPipe) courseId: string,
@@ -102,6 +102,7 @@ export class CertificatesController {
   constructor(private readonly enrollmentsService: EnrollmentsService) {}
 
   @Get('verify/:code')
+  @Throttle({ default: { ttl: 60_000, limit: 15 } })
   verifyCertificate(@Param('code') code: string) {
     return this.enrollmentsService.verifyCertificate(code);
   }

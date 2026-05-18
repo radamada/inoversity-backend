@@ -38,7 +38,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
+import { ParseObjectIdPipe, ParseOptionalObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 import { CreateCourseDto } from '../courses/dto/create-course.dto';
 import { SaveCurriculumDto } from '../courses/dto/save-curriculum.dto';
 
@@ -105,16 +105,20 @@ class CreateLessonDto {
 
 class QuizQuestionDto {
   @IsString()
+  @MinLength(3, { message: 'Întrebarea trebuie să aibă cel puțin 3 caractere' })
   question: string;
 
   @IsArray()
   @IsString({ each: true })
   @ArrayMinSize(2)
+  @ArrayMaxSize(6)
   options: string[];
 
-  @IsInt()
-  @Min(0)
-  correctIndex: number;
+  @IsArray()
+  @IsInt({ each: true })
+  correctIndexes: number[];
+
+  // Note: cross-field validation (correctIndexes < options.length) is enforced in the service
 }
 
 class CreateQuizDto {
@@ -152,11 +156,14 @@ class PaginationDto {
   @Min(1)
   page?: number = 1;
 
+  // Hard cap on page size — without this an admin (or attacker with admin
+  // creds) could request limit=999999 and force the API to materialize
+  // entire collections into memory in one shot.
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(1)
-  @Max(1000)
+  @Max(100)
   limit?: number = 20;
 }
 
@@ -218,8 +225,13 @@ export class AdminController {
 
   @Get('instructors')
   @ApiOperation({ summary: 'Lista instructorilor' })
-  getInstructors() {
-    return this.adminService.getInstructors();
+  getInstructors(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const p = page ? Math.max(1, parseInt(page, 10)) : 1;
+    const l = limit ? Math.min(100, Math.max(1, parseInt(limit, 10) || 50)) : 50;
+    return this.adminService.getInstructors(p, l);
   }
 
   @Get('instructors/:id/stats')
@@ -295,7 +307,9 @@ export class AdminController {
 
   @Get('courses-list')
   @ApiOperation({ summary: 'Listă simplificată de cursuri pentru filtre (id + title)' })
-  getCoursesList(@Query('instructorId') instructorId?: string) {
+  getCoursesList(
+    @Query('instructorId', ParseOptionalObjectIdPipe) instructorId?: string,
+  ) {
     return this.adminService.getCoursesList(instructorId);
   }
 

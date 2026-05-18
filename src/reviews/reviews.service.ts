@@ -38,27 +38,36 @@ export class ReviewsService {
       throw new BadRequestException('Trebuie să fii înscris pentru a lăsa o recenzie');
     }
 
-    const existing = await this.reviewModel.findOne({
-      userId: new Types.ObjectId(userId),
-      courseId: new Types.ObjectId(courseId),
-    });
-
-    let review: ReviewDocument;
-    if (existing) {
-      existing.rating = rating;
-      existing.comment = comment;
-      review = await existing.save();
-    } else {
-      review = await new this.reviewModel({
+    // Atomic upsert — eliminates race condition where two concurrent requests
+    // both pass the findOne check and both try to create a review.
+    // { upsert: true, new: true } guarantees exactly one document regardless of concurrency.
+    const review = await this.reviewModel.findOneAndUpdate(
+      {
         userId: new Types.ObjectId(userId),
         courseId: new Types.ObjectId(courseId),
-        rating,
-        comment,
-      }).save();
-    }
+      },
+      { $set: { rating, comment } },
+      { upsert: true, new: true },
+    );
 
-    // Update course rating
-    await this.coursesService.updateRating(courseId);
+    // Update course rating — fire-and-forget is acceptable here;
+    // rating is eventually consistent and recalculated from all reviews.
+    this.coursesService.updateRating(courseId).catch(() => {});
+
     return review;
+  }
+
+  /**
+   * Admin-only review removal. Recalculates the course's aggregate rating
+   * after deletion — without this, the course rating/reviewCount would stay
+   * stale when an admin removes an abusive or off-topic review.
+   */
+  async deleteAsAdmin(reviewId: string): Promise<void> {
+    if (!Types.ObjectId.isValid(reviewId)) {
+      throw new BadRequestException('ID invalid');
+    }
+    const review = await this.reviewModel.findByIdAndDelete(reviewId);
+    if (!review) throw new NotFoundException('Recenzia nu a fost găsită');
+    await this.coursesService.updateRating(review.courseId.toString()).catch(() => {});
   }
 }

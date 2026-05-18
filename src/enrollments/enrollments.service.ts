@@ -10,6 +10,7 @@ import { Model, Types } from 'mongoose';
 import { Enrollment, EnrollmentDocument } from './schemas/enrollment.schema';
 import { Lesson, LessonDocument } from '../courses/schemas/lesson.schema';
 import { Course, CourseDocument } from '../courses/schemas/course.schema';
+import { User, UserDocument } from '../users/schemas/user.schema';
 
 @Injectable()
 export class EnrollmentsService {
@@ -18,6 +19,7 @@ export class EnrollmentsService {
     @InjectModel(Enrollment.name) private enrollmentModel: Model<EnrollmentDocument>,
     @InjectModel(Lesson.name) private lessonModel: Model<LessonDocument>,
     @InjectModel(Course.name) private courseModel: Model<CourseDocument>,
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
   ) {}
 
   async enroll(userId: string, courseId: string, orderId: string): Promise<EnrollmentDocument> {
@@ -78,6 +80,12 @@ export class EnrollmentsService {
     return !!course && course.instructorId.toString() === userId;
   }
 
+  /** Returns true if the user has the admin role */
+  private async isAdmin(userId: string): Promise<boolean> {
+    const user = await this.userModel.findById(userId).select('role').lean();
+    return !!user && user.role === 'admin';
+  }
+
   /**
    * Auto-creates an enrollment for a course owner/admin (no orderId).
    * Idempotent — safe to call multiple times.
@@ -120,6 +128,42 @@ export class EnrollmentsService {
     return this.isCourseOwner(userId, courseId);
   }
 
+  /**
+   * Auto-enroll the course owner when their course is published.
+   * Idempotent — safe to call multiple times (ignores duplicates).
+   */
+  async autoEnrollOwner(userId: string, courseId: string): Promise<void> {
+    await this.autoEnroll(userId, courseId).catch(() => {});
+  }
+
+  /**
+   * Auto-enroll all admin users in a course.
+   * Called when a course is created so admins always have access.
+   */
+  async autoEnrollAdmins(courseId: string): Promise<void> {
+    const admins = await this.userModel.find({ role: 'admin' }).select('_id').lean();
+    await Promise.all(
+      admins.map((admin) => this.autoEnroll(admin._id.toString(), courseId).catch(() => {})),
+    );
+  }
+
+  /**
+   * Returns the subset of courseIds in which the user already has an active enrollment.
+   * Single $in query instead of N individual countDocuments calls.
+   */
+  async findAlreadyEnrolledCourseIds(userId: string, courseIds: string[]): Promise<string[]> {
+    if (!courseIds.length) return [];
+    const enrollments = await this.enrollmentModel
+      .find({
+        userId: new Types.ObjectId(userId),
+        courseId: { $in: courseIds.map((id) => new Types.ObjectId(id)) },
+        status: 'active',
+      })
+      .select('courseId')
+      .lean();
+    return enrollments.map((e) => e.courseId.toString());
+  }
+
   async revokeEnrollments(userId: string, courseIds: string[]): Promise<void> {
     // Find only courses with active enrollments before revoking
     const activeCourseIds = await this.enrollmentModel.distinct('courseId', {
@@ -147,26 +191,6 @@ export class EnrollmentsService {
   }
 
   async getMyEnrollments(userId: string) {
-    // Auto-create enrollments for courses this user owns (instructor/admin)
-    const ownedCourses = await this.courseModel
-      .find({ instructorId: new Types.ObjectId(userId), published: true })
-      .select('_id')
-      .lean();
-
-    if (ownedCourses.length > 0) {
-      const existingEnrollments = await this.enrollmentModel
-        .find({ userId: new Types.ObjectId(userId) })
-        .select('courseId')
-        .lean();
-      const enrolledIds = new Set(existingEnrollments.map((e) => e.courseId.toString()));
-
-      await Promise.all(
-        ownedCourses
-          .filter((c) => !enrolledIds.has(c._id.toString()))
-          .map((c) => this.autoEnroll(userId, c._id.toString())),
-      );
-    }
-
     return this.enrollmentModel
       .find({ userId: new Types.ObjectId(userId) })
       .populate({
@@ -184,7 +208,7 @@ export class EnrollmentsService {
       courseId: new Types.ObjectId(courseId),
     });
     if (!enrollment) {
-      if (await this.isCourseOwner(userId, courseId)) {
+      if (await this.isCourseOwner(userId, courseId) || await this.isAdmin(userId)) {
         enrollment = await this.autoEnroll(userId, courseId);
       } else {
         throw new NotFoundException('Nu ești înscris la acest curs');
@@ -218,7 +242,7 @@ export class EnrollmentsService {
       courseId: new Types.ObjectId(courseId),
     });
     if (!enrollment) {
-      if (await this.isCourseOwner(userId, courseId)) {
+      if (await this.isCourseOwner(userId, courseId) || await this.isAdmin(userId)) {
         enrollment = await this.autoEnroll(userId, courseId);
       } else {
         throw new NotFoundException('Nu ești înscris la acest curs');
@@ -265,14 +289,14 @@ export class EnrollmentsService {
     userId: string,
     courseId: string,
     quizId: string,
-    answers: number[],
+    answers: number[][],
   ): Promise<{ score: number; passed: boolean; correctAnswers: number; totalQuestions: number }> {
     let enrollment: EnrollmentDocument | null = await this.enrollmentModel.findOne({
       userId: new Types.ObjectId(userId),
       courseId: new Types.ObjectId(courseId),
     });
     if (!enrollment) {
-      if (await this.isCourseOwner(userId, courseId)) {
+      if (await this.isCourseOwner(userId, courseId) || await this.isAdmin(userId)) {
         enrollment = await this.autoEnroll(userId, courseId);
       } else {
         throw new NotFoundException('Nu ești înscris la acest curs');
@@ -289,14 +313,34 @@ export class EnrollmentsService {
     });
     if (!quiz) throw new NotFoundException('Quiz-ul nu există în acest curs');
 
-    const questions = quiz.questions as { question: string; options: string[]; correctIndex: number }[];
+    const questions = quiz.questions as { question: string; options: string[]; correctIndexes: number[] }[];
     const totalQuestions = questions.length;
     if (totalQuestions === 0) throw new BadRequestException('Quiz-ul nu are întrebări');
 
-    // Calculate score
+    // Validate answer array — must match question count exactly
+    if (!Array.isArray(answers) || answers.length !== totalQuestions) {
+      throw new BadRequestException(
+        `Trebuie să răspunzi la toate cele ${totalQuestions} întrebări`,
+      );
+    }
+    // Validate each answer set contains valid indices
+    for (let i = 0; i < answers.length; i++) {
+      if (!Array.isArray(answers[i]) || answers[i].length === 0) {
+        throw new BadRequestException(`Trebuie să selectezi cel puțin un răspuns pentru întrebarea ${i + 1}`);
+      }
+      for (const idx of answers[i]) {
+        if (!Number.isInteger(idx) || idx < 0 || idx >= questions[i].options.length) {
+          throw new BadRequestException(`Răspuns invalid pentru întrebarea ${i + 1}`);
+        }
+      }
+    }
+
+    // Calculate score — answer is correct only if selected set matches correct set exactly
     let correctAnswers = 0;
     for (let i = 0; i < totalQuestions; i++) {
-      if (answers[i] !== undefined && answers[i] === questions[i].correctIndex) {
+      const correct = new Set(questions[i].correctIndexes);
+      const selected = new Set(answers[i]);
+      if (correct.size === selected.size && [...correct].every((v) => selected.has(v))) {
         correctAnswers++;
       }
     }
@@ -350,7 +394,23 @@ export class EnrollmentsService {
     if (!enrollment) throw new NotFoundException('Nu ești înscris la acest curs');
     if (!enrollment.completedAt) throw new BadRequestException('Cursul nu a fost finalizat încă');
 
-    const studentName = (enrollment.userId as any).name as string;
+    // Ensure verificationCode + certificateName are set — legacy enrollments
+    // completed before these fields were introduced may have them null. We
+    // snapshot the student's name on FIRST certificate issuance so that a
+    // later profile-name edit cannot retroactively alter an already-issued
+    // certificate (or its verification page).
+    let needsSave = false;
+    if (!enrollment.verificationCode) {
+      enrollment.verificationCode = randomUUID();
+      needsSave = true;
+    }
+    if (!enrollment.certificateName) {
+      enrollment.certificateName = (enrollment.userId as any).name as string;
+      needsSave = true;
+    }
+    if (needsSave) await enrollment.save();
+
+    const studentName = enrollment.certificateName as string;
     const courseTitle = (enrollment.courseId as any).title as string;
     const completedDate = enrollment.completedAt.toLocaleDateString('ro-RO', {
       day: 'numeric', month: 'long', year: 'numeric',
@@ -396,42 +456,42 @@ export class EnrollmentsService {
       doc.rect(0, 0, S, H).fill('#312e81');
 
       // Cerc decorativ translucid în bandă
-      doc.save().opacity(0.08).circle(S / 2, H / 2, 90).fill('#a5b4fc').restore();
-      doc.save().opacity(0.05).circle(S / 2, H * 0.3, 60).fill('#c7d2fe').restore();
+      doc.save().opacity(0.08).circle(S / 2, H / 2, 90).fill('#8BBCDB').restore();
+      doc.save().opacity(0.05).circle(S / 2, H * 0.3, 60).fill('#B0D5EA').restore();
 
       // Accent top al benzii
-      doc.rect(0, 0, S, 6).fill('#818cf8');
+      doc.rect(0, 0, S, 6).fill('#6AA1C8');
 
       // Numele platformei sus în bandă
-      doc.fillColor('#c7d2fe').fontSize(10.5).font('Regular')
+      doc.fillColor('#B0D5EA').fontSize(10.5).font('Regular')
         .text('EduInovatrium', 0, 24, { width: S, align: 'center', lineBreak: false });
 
       // Liniuțe decorative sub titlu în bandă
-      doc.moveTo(28, 46).lineTo(S - 28, 46).lineWidth(0.4).strokeColor('#4f46e5').stroke();
-      doc.moveTo(28, 51).lineTo(S - 28, 51).lineWidth(0.4).strokeColor('#4f46e5').stroke();
+      doc.moveTo(28, 46).lineTo(S - 28, 46).lineWidth(0.4).strokeColor('#427AA1').stroke();
+      doc.moveTo(28, 51).lineTo(S - 28, 51).lineWidth(0.4).strokeColor('#427AA1').stroke();
 
       // Sigiliu circular în bandă (centrat sus-mijloc)
       const sx = S / 2, sy = 170;
-      doc.save().opacity(0.18).circle(sx, sy, 52).fill('#818cf8').restore();
-      doc.circle(sx, sy, 52).lineWidth(1.5).strokeColor('#6366f1').stroke();
-      doc.circle(sx, sy, 44).lineWidth(0.5).strokeColor('#4f46e5').stroke();
+      doc.save().opacity(0.18).circle(sx, sy, 52).fill('#6AA1C8').restore();
+      doc.circle(sx, sy, 52).lineWidth(1.5).strokeColor('#427AA1').stroke();
+      doc.circle(sx, sy, 44).lineWidth(0.5).strokeColor('#427AA1').stroke();
       // Raze stea
       for (let i = 0; i < 12; i++) {
         const a = (i * Math.PI * 2) / 12;
         doc.moveTo(sx + 26 * Math.cos(a), sy + 26 * Math.sin(a))
            .lineTo(sx + 36 * Math.cos(a), sy + 36 * Math.sin(a))
-           .lineWidth(0.7).strokeColor('#818cf8').stroke();
+           .lineWidth(0.7).strokeColor('#6AA1C8').stroke();
       }
-      doc.fillColor('#e0e7ff').fontSize(8.5).font('Bold')
+      doc.fillColor('#D4EAF5').fontSize(8.5).font('Bold')
         .text('CERTIFICAT', sx - 24, sy - 11, { lineBreak: false });
-      doc.fillColor('#c7d2fe').fontSize(7.5).font('Regular')
+      doc.fillColor('#B0D5EA').fontSize(7.5).font('Regular')
         .text('VERIFICAT', sx - 19, sy + 3, { lineBreak: false });
 
       // Text vertical rotit în bandă
       doc.save();
       doc.translate(S / 2, H * 0.62);
       doc.rotate(-90);
-      doc.fillColor('#6366f1').fontSize(8.5).font('Regular')
+      doc.fillColor('#427AA1').fontSize(8.5).font('Regular')
         .text('C E R T I F I C A T   D E   A B S O L V I R E', -108, -4, { lineBreak: false });
       doc.restore();
 
@@ -440,21 +500,21 @@ export class EnrollmentsService {
       const qrXl = Math.round((S - qrW) / 2);
       const qrYl = H - qrW - 50;
       doc.image(qrBuffer, qrXl, qrYl, { width: qrW });
-      doc.fillColor('#a5b4fc').fontSize(6.5).font('Regular')
+      doc.fillColor('#8BBCDB').fontSize(6.5).font('Regular')
         .text('Verifică autenticitatea', 0, qrYl + qrW + 3, { width: S, align: 'center', lineBreak: false });
 
       // Footer bandă stânga
       doc.rect(0, H - 26, S, 26).fill('#1e1b4b');
-      doc.fillColor('#6366f1').fontSize(7).font('Regular')
+      doc.fillColor('#427AA1').fontSize(7).font('Regular')
         .text('© ' + new Date().getFullYear() + ' EduInovatrium', 0, H - 16, { width: S, align: 'center', lineBreak: false });
 
       // Separator vertical (dungă accent între bandă și conținut)
-      doc.rect(S, 0, 4, H).fill('#4f46e5');
+      doc.rect(S, 0, 4, H).fill('#427AA1');
 
       // ── ZONĂ CONȚINUT DREAPTA ─────────────────────────────────────
 
       // Accent top
-      doc.rect(RX, 0, RW + 22, 6).fill('#e0e7ff');
+      doc.rect(RX, 0, RW + 22, 6).fill('#D4EAF5');
 
       // Titlu principal
       doc.fillColor('#1e1b4b').fontSize(23).font('Bold')
@@ -462,9 +522,9 @@ export class EnrollmentsService {
 
       // Ornament sub titlu
       const d1Y = 74;
-      doc.moveTo(RX + 20, d1Y).lineTo(RCX - 20, d1Y).lineWidth(0.8).strokeColor('#c7d2fe').stroke();
-      doc.circle(RCX, d1Y, 3.5).fill('#4f46e5');
-      doc.moveTo(RCX + 20, d1Y).lineTo(W - 22, d1Y).lineWidth(0.8).strokeColor('#c7d2fe').stroke();
+      doc.moveTo(RX + 20, d1Y).lineTo(RCX - 20, d1Y).lineWidth(0.8).strokeColor('#B0D5EA').stroke();
+      doc.circle(RCX, d1Y, 3.5).fill('#427AA1');
+      doc.moveTo(RCX + 20, d1Y).lineTo(W - 22, d1Y).lineWidth(0.8).strokeColor('#B0D5EA').stroke();
 
       // "Aceasta certifică că"
       doc.fillColor('#9ca3af').fontSize(12.5).font('Regular')
@@ -475,14 +535,14 @@ export class EnrollmentsService {
         .text(studentName, RX, 125, { width: RW, align: 'center', lineBreak: false });
 
       // Subliniere sub nume
-      doc.moveTo(RCX - 115, 172).lineTo(RCX + 115, 172).lineWidth(0.5).strokeColor('#e0e7ff').stroke();
+      doc.moveTo(RCX - 115, 172).lineTo(RCX + 115, 172).lineWidth(0.5).strokeColor('#D4EAF5').stroke();
 
       // "a finalizat..."
       doc.fillColor('#9ca3af').fontSize(12.5).font('Regular')
         .text('a finalizat cu succes cursul', RX, 186, { width: RW, align: 'center', lineBreak: false });
 
       // Titlul cursului
-      doc.fillColor('#4338ca').fontSize(18).font('Bold')
+      doc.fillColor('#2F6480').fontSize(18).font('Bold')
         .text(`"${courseTitle}"`, RX, 214, { width: RW, align: 'center', lineBreak: false });
 
       // Data
@@ -506,7 +566,7 @@ export class EnrollmentsService {
 
       // Footer bandă dreapta
       doc.rect(RX, H - 28, W - RX, 28).fill('#eef2ff');
-      doc.fillColor('#818cf8').fontSize(8).font('Regular')
+      doc.fillColor('#6AA1C8').fontSize(8).font('Regular')
         .text('www.eduinovatrium.ro  ·  Certificat generat electronic', RX, H - 17, {
           width: RW, align: 'center', lineBreak: false,
         });
@@ -531,7 +591,9 @@ export class EnrollmentsService {
 
     return {
       valid: true,
-      studentName: (enrollment.userId as any).name,
+      // Prefer snapshot taken at issuance; fall back to live name only for
+      // legacy enrollments completed before certificateName existed.
+      studentName: enrollment.certificateName ?? (enrollment.userId as any).name,
       courseTitle: (enrollment.courseId as any).title,
       courseSlug: (enrollment.courseId as any).slug,
       completedAt: enrollment.completedAt,
@@ -539,7 +601,10 @@ export class EnrollmentsService {
   }
 
   async countByCourse(courseId: string): Promise<number> {
-    return this.enrollmentModel.countDocuments({ courseId: new Types.ObjectId(courseId) });
+    return this.enrollmentModel.countDocuments({
+      courseId: new Types.ObjectId(courseId),
+      orderId: { $ne: null },
+    });
   }
 
   async findAll(page = 1, limit = 20) {

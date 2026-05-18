@@ -48,10 +48,25 @@ async function bootstrap() {
   app.use(urlencoded({ extended: false, limit: '1mb' }));
 
   // CORS
-  const frontendUrl = config.get<string>('FRONTEND_URL', 'http://localhost:3000');
+  // In production we MUST have FRONTEND_URL set explicitly — silently
+  // falling back to http://localhost:3000 means a forgotten env var lets
+  // CORS pass for nothing (since no production browser request will ever
+  // come from localhost), so every legitimate frontend call gets blocked
+  // and the only logged symptom is generic "CORS: origin … not allowed".
+  // Fail loud at boot instead.
+  const isProd = config.get('NODE_ENV') === 'production';
+  const frontendUrlRaw = config.get<string>('FRONTEND_URL');
+  if (isProd && !frontendUrlRaw) {
+    throw new Error(
+      'FRONTEND_URL env var is required in production. Set it to the public origin of the frontend (e.g. https://eduinovatrium.ro) before starting the API.',
+    );
+  }
+  const frontendUrl = frontendUrlRaw ?? 'http://localhost:3000';
+  if (!frontendUrlRaw) {
+    logger.warn('FRONTEND_URL not set — defaulting to http://localhost:3000 (development only)', 'Bootstrap');
+  }
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      const isProd = config.get('NODE_ENV') === 'production';
       // In production: only allow the configured frontend URL
       // In development: also allow any localhost port (for Swagger, dev servers)
       if (!origin || origin === frontendUrl) {

@@ -56,19 +56,13 @@ export class InstructorService {
 
     let totalRevenue = 0;
     if (courseIds.length > 0) {
-      const paidOrders = await this.orderModel
-        .find({ status: 'paid', 'items.courseId': { $in: courseIds } })
-        .select('items')
-        .lean();
-
-      const courseIdSet = new Set(courseIds.map((id) => id.toString()));
-      for (const order of paidOrders) {
-        for (const item of order.items) {
-          if (courseIdSet.has(item.courseId.toString())) {
-            totalRevenue += item.price;
-          }
-        }
-      }
+      const revenueAgg = await this.orderModel.aggregate([
+        { $match: { status: 'paid', 'items.courseId': { $in: courseIds } } },
+        { $unwind: '$items' },
+        { $match: { 'items.courseId': { $in: courseIds } } },
+        { $group: { _id: null, total: { $sum: '$items.price' } } },
+      ]);
+      totalRevenue = revenueAgg[0]?.total ?? 0;
     }
 
     return { totalCourses, publishedCourses, totalEnrollments, uniqueStudents, totalRevenue };
@@ -167,46 +161,70 @@ export class InstructorService {
     }
 
     const skip = (page - 1) * limit;
-    let query = this.orderModel.find(filter).populate('userId', 'name email').sort({ createdAt: -1 });
 
-    // Search by student name/email (post-populate filter)
-    const [allMatching, total] = await Promise.all([
-      query.lean(),
-      this.orderModel.countDocuments(filter),
+    const pipeline: any[] = [
+      { $match: filter },
+      {
+        // Use let+pipeline form (supported MongoDB 3.6+) instead of combining
+        // localField/foreignField with pipeline (MongoDB 5.0+ only).
+        $lookup: {
+          from: 'users',
+          let: { uid: '$userId' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$_id', '$$uid'] } } },
+            { $project: { name: 1, email: 1, avatar: 1 } },
+          ],
+          as: 'userId',
+        },
+      },
+      // preserveNullAndEmptyArrays: true — keep orders even if buyer account was deleted
+      { $unwind: { path: '$userId', preserveNullAndEmptyArrays: true } },
+    ];
+
+    if (filters.search) {
+      const escaped = filters.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
+      pipeline.push({
+        $match: {
+          $or: [
+            { 'userId.name': { $regex: regex } },
+            { 'userId.email': { $regex: regex } },
+          ],
+        },
+      });
+    }
+
+    const countPipeline = [...pipeline, { $count: 'total' }];
+    pipeline.push({ $sort: { createdAt: -1 } });
+    pipeline.push({ $skip: skip });
+    pipeline.push({ $limit: limit });
+
+    const [results, countResult] = await Promise.all([
+      this.orderModel.aggregate(pipeline),
+      this.orderModel.aggregate(countPipeline),
     ]);
+    const total = countResult[0]?.total ?? 0;
 
     const courseIdSet = new Set(allCourseIds.map((id) => id.toString()));
 
-    let results = allMatching.map((order) => ({
+    const enrichedResults = results.map((order: any) => ({
       ...order,
-      items: order.items.filter((item) => courseIdSet.has(item.courseId.toString())),
+      items: order.items.filter((item: any) => courseIdSet.has(item.courseId.toString())),
       myRevenue: order.status === 'refunded'
         ? 0
         : order.items
-            .filter((item) => courseIdSet.has(item.courseId.toString()))
-            .reduce((sum, item) => sum + item.price, 0),
+            .filter((item: any) => courseIdSet.has(item.courseId.toString()))
+            .reduce((sum: number, item: any) => sum + item.price, 0),
     }));
 
-    // Client-side search filter (name/email)
-    if (filters.search) {
-      const q = filters.search.toLowerCase();
-      results = results.filter((o: any) =>
-        o.userId?.name?.toLowerCase().includes(q) ||
-        o.userId?.email?.toLowerCase().includes(q),
-      );
-    }
-
-    const paginated = results.slice(skip, skip + limit);
-    const realTotal = filters.search ? results.length : total;
-
-    // Compute available statuses from all matching results (before status filter)
-    const availableStatuses = [...new Set(results.map((o: any) => o.status))];
+    // Compute available statuses from returned results
+    const availableStatuses = [...new Set(enrichedResults.map((o: any) => o.status))];
 
     return {
-      orders: paginated,
-      total: realTotal,
+      orders: enrichedResults,
+      total,
       page,
-      pages: Math.ceil(realTotal / limit),
+      pages: Math.ceil(total / limit),
       courses: myCourses.map((c: any) => ({ _id: c._id.toString(), title: c.title })),
       availableStatuses,
     };
@@ -276,7 +294,7 @@ export class InstructorService {
   async createQuiz(
     courseId: string,
     sectionId: string,
-    dto: { title: string; questions: { question: string; options: string[]; correctIndex: number }[] },
+    dto: { title: string; questions: { question: string; options: string[]; correctIndexes: number[] }[] },
     instructorId: string,
     isAdmin = false,
   ) {
@@ -287,7 +305,7 @@ export class InstructorService {
   async updateQuiz(
     courseId: string,
     quizId: string,
-    dto: Partial<{ title: string; questions: { question: string; options: string[]; correctIndex: number }[] }>,
+    dto: Partial<{ title: string; questions: { question: string; options: string[]; correctIndexes: number[] }[] }>,
     instructorId: string,
     isAdmin = false,
   ) {

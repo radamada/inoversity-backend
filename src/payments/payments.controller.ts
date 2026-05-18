@@ -8,24 +8,30 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
 import { OrdersService } from '../orders/orders.service';
+import {
+  ProcessedWebhookEvent,
+  ProcessedWebhookEventDocument,
+} from './schemas/processed-webhook-event.schema';
 
 @ApiTags('Payments')
 @Controller('orders')
 export class PaymentsController {
   private stripe: Stripe;
   private readonly logger = new Logger(PaymentsController.name);
-  private processedEvents = new Map<string, number>();
-  private readonly MAX_PROCESSED_EVENTS = 10000;
 
   constructor(
     private ordersService: OrdersService,
     private config: ConfigService,
+    @InjectModel(ProcessedWebhookEvent.name)
+    private processedEventModel: Model<ProcessedWebhookEventDocument>,
   ) {
     this.stripe = new Stripe(this.config.get<string>('STRIPE_SECRET_KEY') ?? '', {
       apiVersion: '2024-04-10' as any,
@@ -51,42 +57,42 @@ export class PaymentsController {
     }
 
     try {
-      event = this.stripe.webhooks.constructEvent(
-        rawBody,
-        sig,
-        webhookSecret ?? '',
-      );
+      event = this.stripe.webhooks.constructEvent(rawBody, sig, webhookSecret ?? '');
     } catch (err: any) {
       this.logger.error(`Webhook signature error: ${err.message}`);
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    // Fast-path duplicate check within the same server instance
-    if (this.processedEvents.has(event.id)) {
-      return res.json({ received: true });
-    }
-
-    // Evict oldest entries if the map grows too large
-    if (this.processedEvents.size >= this.MAX_PROCESSED_EVENTS) {
-      const cutoff = this.processedEvents.size - Math.floor(this.MAX_PROCESSED_EVENTS / 2);
-      let i = 0;
-      for (const key of this.processedEvents.keys()) {
-        if (i++ >= cutoff) break;
-        this.processedEvents.delete(key);
+    // Atomic deduplication via MongoDB unique index on eventId.
+    // Works across server restarts and multiple backend instances.
+    // If two instances receive the same event simultaneously, only one
+    // will succeed the insert — the other gets a duplicate key error (11000).
+    try {
+      await this.processedEventModel.create({ eventId: event.id });
+    } catch (err: any) {
+      if (err.code === 11000) {
+        // Already processed by this or another instance
+        this.logger.log(`Duplicate webhook event skipped: ${event.id}`);
+        return res.json({ received: true });
       }
+      throw err;
     }
 
     if (event.type === 'payment_intent.succeeded') {
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
       try {
-        await this.ordersService.confirmPayment(paymentIntent.id);
-        this.logger.log(`Payment confirmed: ${paymentIntent.id}`);
+        const enrolled = await this.ordersService.confirmPayment(paymentIntent.id);
+        if (enrolled) {
+          this.logger.log(`Payment confirmed and enrolled: ${paymentIntent.id}`);
+        }
       } catch (err: any) {
         this.logger.error(`Error confirming payment: ${err.message}`);
+        // Delete the event record so Stripe can retry and enrollments are retried
+        await this.processedEventModel.deleteOne({ eventId: event.id }).catch(() => {});
+        return res.status(500).json({ error: 'Enrollment failed, will retry' });
       }
     }
 
-    this.processedEvents.set(event.id, Date.now());
     res.json({ received: true });
   }
 }

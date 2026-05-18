@@ -47,9 +47,22 @@ export class Enrollment {
   /** UUID used for certificate verification URL — not guessable like ObjectId */
   @Prop({ type: String, default: null })
   verificationCode: string | null;
+
+  /**
+   * Snapshot of the student's name at the moment the certificate was first
+   * issued. Without this, a later profile-name change would silently rewrite
+   * the name on every re-download of the same certificate, breaking any
+   * authenticity guarantee for already-distributed PDFs.
+   */
+  @Prop({ type: String, default: null })
+  certificateName: string | null;
 }
 
 export const EnrollmentSchema = SchemaFactory.createForClass(Enrollment);
 EnrollmentSchema.index({ userId: 1, courseId: 1 }, { unique: true });
 EnrollmentSchema.index({ status: 1, orderId: 1 });
+// Admin dashboards / reports filter by status alone (e.g. all refunded).
+EnrollmentSchema.index({ status: 1 });
+// "Continue learning" lists for a user — sort by most recent access.
+EnrollmentSchema.index({ userId: 1, lastAccessedAt: -1 });
 EnrollmentSchema.index({ verificationCode: 1 }, { sparse: true });

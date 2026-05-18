@@ -3,7 +3,20 @@ import { Document, Types } from 'mongoose';
 
 export type CourseDocument = Course & Document;
 
-@Schema({ timestamps: true })
+// `versionKey: false` keeps Mongoose from leaking `__v` into responses. The
+// lookup paths in courses.service.ts use lean() and spread the result back
+// to the client; without this, `__v` was silently included in API output.
+// `toJSON` transform also drops `__v` defensively for any non-lean serialization.
+@Schema({
+  timestamps: true,
+  versionKey: false,
+  toJSON: {
+    transform: (_doc, ret: any) => {
+      delete ret.__v;
+      return ret;
+    },
+  },
+})
 export class Course {
   @Prop({ required: true, trim: true })
   title: string;
@@ -60,3 +73,12 @@ export class Course {
 
 export const CourseSchema = SchemaFactory.createForClass(Course);
 CourseSchema.index({ title: 'text', description: 'text', tags: 'text' });
+// slug already unique-indexed via @Prop({ unique: true }) — no need to repeat.
+// Hot paths:
+//   • Public listing — filter by published, sort by createdAt
+//   • Instructor "my courses" — filter by instructorId, possibly + published
+//   • Category browsing — filter by categoryId + published
+// Without these, Mongo does collection scans on every list request.
+CourseSchema.index({ published: 1, createdAt: -1 });
+CourseSchema.index({ instructorId: 1, published: 1 });
+CourseSchema.index({ categoryId: 1, published: 1 });

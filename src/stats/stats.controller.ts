@@ -5,6 +5,7 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { Course, CourseDocument } from '../courses/schemas/course.schema';
 import { AppCacheService } from '../common/cache/app-cache.service';
+import { CACHE_TTL_MS } from '../common/constants/timings';
 
 @ApiTags('stats')
 @Controller('stats')
@@ -29,7 +30,7 @@ export class StatsController {
       this.userModel.countDocuments({ role: 'instructor' }),
     ]);
     const stats = { courses, students, instructors };
-    await this.appCache.set(this.CACHE_KEY, stats, 300_000); // 5 min
+    await this.appCache.set(this.CACHE_KEY, stats, CACHE_TTL_MS.STATS);
     return stats;
   }
 }

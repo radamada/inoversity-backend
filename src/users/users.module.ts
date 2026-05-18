@@ -5,6 +5,7 @@ import { UsersController } from './users.controller';
 import { User, UserSchema } from './schemas/user.schema';
 import { Course, CourseSchema } from '../courses/schemas/course.schema';
 import { MediaModule } from '../media/media.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { MediaModule } from '../media/media.module';
       { name: Course.name, schema: CourseSchema },
     ]),
     MediaModule,
+    MailModule,
   ],
   providers: [UsersService],
   controllers: [UsersController],

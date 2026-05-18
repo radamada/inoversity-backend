@@ -7,9 +7,9 @@ import {
   IsIn,
   IsInt,
   Min,
-  Max,
   MaxLength,
   ArrayMaxSize,
+  ArrayMinSize,
   ValidateNested,
   ValidationArguments,
   ValidatorConstraint,
@@ -18,17 +18,18 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-@ValidatorConstraint({ name: 'correctIndexInBounds', async: false })
-class CorrectIndexInBoundsConstraint implements ValidatorConstraintInterface {
-  validate(value: number, args: ValidationArguments) {
+@ValidatorConstraint({ name: 'correctIndexesInBounds', async: false })
+class CorrectIndexesInBoundsConstraint implements ValidatorConstraintInterface {
+  validate(value: number[], args: ValidationArguments) {
     const obj = args.object as any;
     if (!Array.isArray(obj.options) || obj.options.length === 0) return false;
-    return Number.isInteger(value) && value >= 0 && value < obj.options.length;
+    if (!Array.isArray(value) || value.length === 0) return false;
+    return value.every((v) => Number.isInteger(v) && v >= 0 && v < obj.options.length);
   }
   defaultMessage(args: ValidationArguments) {
     const obj = args.object as any;
     const len = Array.isArray(obj.options) ? obj.options.length : 0;
-    return `correctIndex trebuie să fie între 0 și ${Math.max(0, len - 1)} (numărul de opțiuni)`;
+    return `correctIndexes trebuie să conțină indexuri valide între 0 și ${Math.max(0, len - 1)}`;
   }
 }
 
@@ -42,11 +43,12 @@ export class QuizQuestionDto {
   @ArrayMaxSize(10)
   options: string[];
 
-  @IsInt()
-  @Min(0)
-  @Max(9)
-  @Validate(CorrectIndexInBoundsConstraint)
-  correctIndex: number;
+  @IsArray()
+  @IsInt({ each: true })
+  @ArrayMinSize(1)
+  @ArrayMaxSize(10)
+  @Validate(CorrectIndexesInBoundsConstraint)
+  correctIndexes: number[];
 }
 
 export class CurriculumLessonDto {

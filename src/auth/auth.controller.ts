@@ -12,7 +12,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -36,7 +36,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
-  @Throttle({ default: { ttl: 60000, limit: 5 } })
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
   @ApiOperation({ summary: 'Înregistrare utilizator nou' })
   async register(
     @Body() dto: RegisterDto,
@@ -70,13 +70,9 @@ export class AuthController {
     return { ok: true };
   }
 
-  @Get('clear-session')
-  @HttpCode(HttpStatus.OK)
-  clearSessionGet(@Res() res: Response) {
-    this.clearAuthCookies(res as any);
-    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
-    (res as any).redirect(`${frontendUrl}/login`);
-  }
+  // GET /clear-session was removed: state-changing endpoints must not be
+  // reachable via GET (CSRF — `<img src=...>`, prefetch, link preview can
+  // trigger a logout). Frontend uses POST /clear-session exclusively.
 
   // ── Google OAuth ──────────────────────────────────────────────────────────
 
@@ -207,7 +203,12 @@ export class AuthController {
     const u = user?.toObject ? user.toObject() : { ...user };
     delete u.passwordHash;
     delete u.passwordResetToken;
+    delete u.passwordResetExpires;
     delete u.emailVerificationToken;
+    delete u.tokenVersion;
+    delete u.emailChangeToken;
+    delete u.emailChangeTokenExpires;
+    delete u.emailChangeOldConfirmed;
     return u;
   }
 }

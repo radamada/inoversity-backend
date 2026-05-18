@@ -17,7 +17,11 @@ export class CartService {
     const uid = new Types.ObjectId(userId);
     const cart = await this.cartModel
       .findOne({ userId: uid })
-      .populate('items', 'title slug thumbnail price rating instructorId')
+      .populate({
+        path: 'items',
+        select: 'title slug thumbnail price rating instructorId',
+        populate: { path: 'instructorId', select: 'name' },
+      })
       .exec();
     return cart ?? { userId, items: [] };
   }

@@ -15,8 +15,11 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { CouponsService } from './coupons.service';
-import type { CreateCouponDto } from './coupons.service';
+import { CouponsService, CreateCouponDto } from './coupons.service';
+// NOTE: CreateCouponDto must be a VALUE import (not `import type`) so NestJS
+// can read its class-validator metadata at runtime. Type-only imports get
+// stripped by tsc, leaving ValidationPipe with no schema → it rejects every
+// body property as "should not exist".
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';

@@ -1,13 +1,16 @@
 import {
-  Controller, Get, Patch, Post, Body, Param,
+  Controller, Get, Patch, Post, Body, Param, Query,
   UseGuards, UseInterceptors, UploadedFile, BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { UsersService } from './users.service';
 import { MediaService } from '../media/media.service';
+import { MailService } from '../mail/mail.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { ChangeEmailDto } from './dto/change-email.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
@@ -18,6 +21,7 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly mediaService: MediaService,
+    private readonly mailService: MailService,
   ) {}
 
   // ── Public endpoints — no auth required ─────────────────────────────────
@@ -53,9 +57,42 @@ export class UsersController {
     return this.usersService.changePassword(user._id, dto);
   }
 
+  @Throttle({ default: { ttl: 3_600_000, limit: 3 } })
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post('me/email')
+  @ApiOperation({ summary: 'Solicită schimbarea adresei de email — max 3 cereri/oră' })
+  async requestEmailChange(@CurrentUser() user: any, @Body() dto: ChangeEmailDto) {
+    const token = await this.usersService.requestEmailChange(user._id, dto.newEmail, dto.currentPassword);
+    // Fire-and-forget — nu blocăm răspunsul pentru trimiterea emailului
+    this.mailService.sendEmailChangeOldConfirmation(user.email, token).catch(() => {});
+    return { message: 'Un email de confirmare a fost trimis la adresa ta curentă' };
+  }
+
+  @Get('email/confirm-old')
+  @ApiOperation({ summary: 'Confirmă adresa veche de email (pasul 1)' })
+  async confirmOldEmail(@Query('token') token: string) {
+    if (!token) throw new BadRequestException('Token lipsă');
+    const { pendingEmail, token: sameToken } = await this.usersService.confirmOldEmailChange(token);
+    // Trimite email la noua adresă — fire-and-forget
+    this.mailService.sendEmailChangeNewConfirmation(pendingEmail, sameToken).catch(() => {});
+    return { message: 'Adresa curentă a fost confirmată. Verifică inbox-ul noii adrese de email.' };
+  }
+
+  @Get('email/confirm-new')
+  @ApiOperation({ summary: 'Confirmă noua adresă de email (pasul 2)' })
+  async confirmNewEmail(@Query('token') token: string) {
+    if (!token) throw new BadRequestException('Token lipsă');
+    const { message, oldEmail } = await this.usersService.confirmNewEmailChange(token);
+    // Notificăm adresa veche că schimbarea a fost finalizată
+    this.mailService.sendEmailChangedNotification(oldEmail).catch(() => {});
+    return { message };
+  }
+
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Post('me/avatar')
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
   @ApiOperation({ summary: 'Upload avatar utilizator pe CDN' })
   async uploadAvatar(@UploadedFile() file: Express.Multer.File, @CurrentUser() user: any) {

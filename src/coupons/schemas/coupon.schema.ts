@@ -56,7 +56,17 @@ export class Coupon {
     default: [],
   })
   usages: { userId: Types.ObjectId; usedAt: Date }[];
+
+  /**
+   * Soft-delete marker. When set, the coupon is hidden from listings and rejected
+   * by validate/apply, but the document survives so that historical orders that
+   * reference `couponCode` can still be audited (which discount/scope it had).
+   */
+  @Prop({ type: Date, default: null })
+  deletedAt: Date | null;
 }
 
 export const CouponSchema = SchemaFactory.createForClass(Coupon);
 // Index on `code` is already created by `unique: true` in @Prop above — no duplicate needed.
+// Index for filtering active (non-deleted) coupons in admin/instructor listings.
+CouponSchema.index({ deletedAt: 1 });

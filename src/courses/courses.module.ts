@@ -12,10 +12,12 @@ import { Cart, CartSchema } from '../cart/schemas/cart.schema';
 import { Order, OrderSchema } from '../orders/schemas/order.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { MediaModule } from '../media/media.module';
+import { EnrollmentsModule } from '../enrollments/enrollments.module';
 
 @Module({
   imports: [
     MediaModule,
+    EnrollmentsModule,
     MongooseModule.forFeature([
       { name: Course.name, schema: CourseSchema },
       { name: Section.name, schema: SectionSchema },

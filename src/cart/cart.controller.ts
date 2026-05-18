@@ -10,6 +10,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { CartService } from './cart.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -36,16 +37,19 @@ export class CartController {
   }
 
   @Post('items')
+  @Throttle({ default: { ttl: 60000, limit: 30 } })
   addItem(@CurrentUser() user: any, @Body() dto: AddToCartDto) {
     return this.cartService.addItem(user._id.toString(), dto.courseId);
   }
 
   @Delete('items/:courseId')
+  @Throttle({ default: { ttl: 60000, limit: 30 } })
   removeItem(@CurrentUser() user: any, @Param('courseId', ParseObjectIdPipe) courseId: string) {
     return this.cartService.removeItem(user._id.toString(), courseId);
   }
 
   @Delete()
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
   @HttpCode(HttpStatus.NO_CONTENT)
   clearCart(@CurrentUser() user: any) {
     return this.cartService.clearCart(user._id.toString());

@@ -5,8 +5,8 @@ export type LessonDocument = Lesson & Document;
 
 export class QuizQuestion {
   question: string;
-  options: string[];      // exactly 4 options
-  correctIndex: number;   // 0-based index of correct option
+  options: string[];         // 2–10 options
+  correctIndexes: number[];  // 0-based indexes of correct options (supports multiple)
 }
 
 @Schema({ timestamps: true })
@@ -43,7 +43,7 @@ export class Lesson {
       {
         question: { type: String, required: true },
         options: { type: [String], required: true },
-        correctIndex: { type: Number, required: true },
+        correctIndexes: { type: [Number], required: true },
       },
     ],
     default: [],

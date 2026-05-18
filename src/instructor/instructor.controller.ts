@@ -25,8 +25,9 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CoursesService } from '../courses/courses.service';
 import { CreateCourseDto } from '../courses/dto/create-course.dto';
 import { SaveCurriculumDto } from '../courses/dto/save-curriculum.dto';
-import { CouponsService } from '../coupons/coupons.service';
-import type { CreateCouponDto } from '../coupons/coupons.service';
+import { CouponsService, CreateCouponDto } from '../coupons/coupons.service';
+// Value import (not `import type`) — see note in coupons.controller.ts. Without
+// this, ValidationPipe has no DTO metadata and rejects all body properties.
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 
 class PaginationDto {
@@ -124,9 +125,9 @@ class QuizQuestionDto {
   @ArrayMinSize(2)
   options: string[];
 
-  @IsInt()
-  @Min(0)
-  correctIndex: number;
+  @IsArray()
+  @IsInt({ each: true })
+  correctIndexes: number[];
 }
 
 class CreateQuizDto {
@@ -347,10 +348,8 @@ export class InstructorController {
   @Get('coupons')
   @ApiOperation({ summary: 'Cupoanele mele' })
   getMyCoupons(@CurrentUser() user: any) {
-    // Admin sees all; instructor sees only own
-    if (false) {
-      return this.couponsService.findAll();
-    }
+    // Always scope by current user. Admins managing all coupons should use the
+    // dedicated /coupons admin endpoint, not /instructor/coupons.
     return this.couponsService.findByInstructor(user._id.toString());
   }
 
@@ -361,7 +360,13 @@ export class InstructorController {
     // Validate course ownership — prevent IDOR
     if (dto.courseId) {
       const course = await this.coursesService.findById(dto.courseId);
-      if (course.instructorId?.toString() !== user._id.toString()) {
+      // findById() populates instructorId into a User doc, so .toString() returns
+      // "[object Object]". Pull the real id off the populated subdoc (or fall
+      // back to the raw ObjectId if it's somehow not populated).
+      const ownerId =
+        (course.instructorId as any)?._id?.toString() ??
+        (course.instructorId as any)?.toString();
+      if (ownerId !== user._id.toString()) {
         throw new ForbiddenException('Nu poți crea cupoane pentru cursuri care nu îți aparțin');
       }
     }
@@ -378,7 +383,10 @@ export class InstructorController {
     // Validate course ownership on update too
     if (dto.courseId) {
       const course = await this.coursesService.findById(dto.courseId);
-      if (course.instructorId?.toString() !== user._id.toString()) {
+      const ownerId =
+        (course.instructorId as any)?._id?.toString() ??
+        (course.instructorId as any)?.toString();
+      if (ownerId !== user._id.toString()) {
         throw new ForbiddenException('Nu poți asocia cupoane la cursuri care nu îți aparțin');
       }
     }

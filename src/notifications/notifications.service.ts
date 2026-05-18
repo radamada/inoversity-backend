@@ -17,15 +17,24 @@ export class NotificationsService {
     title: string,
     message: string,
     courseId?: string,
-  ): Promise<NotificationDocument> {
-    const notification = new this.notificationModel({
-      userId: new Types.ObjectId(userId),
-      type,
-      title,
-      message,
-      courseId: courseId ? new Types.ObjectId(courseId) : null,
-    });
-    return notification.save();
+    orderId?: string,
+  ): Promise<NotificationDocument | null> {
+    try {
+      const notification = new this.notificationModel({
+        userId: new Types.ObjectId(userId),
+        type,
+        title,
+        message,
+        courseId: courseId ? new Types.ObjectId(courseId) : null,
+        orderId: orderId ? new Types.ObjectId(orderId) : null,
+      });
+      return await notification.save();
+    } catch (err: any) {
+      // Duplicate key on (userId, type, orderId) — already notified for this order.
+      // Idempotent no-op so retried webhooks / re-entered flows don't double-notify.
+      if (err?.code === 11000 && orderId) return null;
+      throw err;
+    }
   }
 
   async notifyEnrolledUsers(

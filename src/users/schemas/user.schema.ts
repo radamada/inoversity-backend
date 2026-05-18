@@ -59,8 +59,24 @@ export class User {
   /** Percentage of course revenue the instructor pays to the platform (0-100) */
   @Prop({ type: Number, default: 0, min: 0, max: 100 })
   revenueSharePercent: number;
+
+  /** Email nou în așteptarea confirmării duble */
+  @Prop({ type: String, default: null })
+  pendingEmail: string | null;
+
+  /** Token pentru fluxul de schimbare email (aceleași token pentru ambii pași) */
+  @Prop({ type: String, default: null })
+  emailChangeToken: string | null;
+
+  @Prop({ type: Date, default: null })
+  emailChangeTokenExpires: Date | null;
+
+  /** True după ce adresa veche a confirmat — pasul 1 din 2 */
+  @Prop({ default: false })
+  emailChangeOldConfirmed: boolean;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
 UserSchema.index({ passwordResetToken: 1 }, { sparse: true });
 UserSchema.index({ googleId: 1 }, { sparse: true, unique: true });
+UserSchema.index({ emailChangeToken: 1 }, { sparse: true });

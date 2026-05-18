@@ -37,6 +37,7 @@ export class MediaService {
   private readonly storageApiKey: string;
   private readonly storageZoneName: string;
   private readonly storageCdnUrl: string;
+  private readonly bindTokenToIp: boolean;
 
   constructor(
     private config: ConfigService,
@@ -51,6 +52,10 @@ export class MediaService {
     this.storageApiKey = config.get<string>('BUNNY_STORAGE_API_KEY') ?? '';
     this.storageZoneName = config.get<string>('BUNNY_STORAGE_ZONE_NAME') ?? '';
     this.storageCdnUrl = config.get<string>('BUNNY_STORAGE_CDN_URL') ?? '';
+    // Only include IP in token hash if Bunny's "Token Auth IP Restriction"
+    // is enabled in the dashboard — otherwise the CDN computes a hash
+    // WITHOUT IP and ours won't match, breaking all playback.
+    this.bindTokenToIp = (config.get<string>('BUNNY_BIND_TOKEN_TO_IP') ?? '').toLowerCase() === 'true';
   }
 
   /**
@@ -119,6 +124,7 @@ export class MediaService {
     videoId: string,
     userId: string,
     courseId: string,
+    clientIp?: string,
   ): Promise<string> {
     const isEnrolled = await this.enrollmentsService.isEnrolled(userId, courseId);
     if (!isEnrolled) {
@@ -135,25 +141,36 @@ export class MediaService {
       throw new ForbiddenException('Videoclipul nu aparține acestui curs');
     }
 
-    return this.buildSignedUrl(videoId);
+    return this.buildSignedUrl(videoId, clientIp);
   }
 
   /**
    * Get signed URL for free preview lessons (no enrollment check).
    * Verifies the lesson is actually marked isFree before returning.
    */
-  async getPreviewUrlForFreeLesson(videoId: string): Promise<string> {
+  async getPreviewUrlForFreeLesson(videoId: string, clientIp?: string): Promise<string> {
     const lesson = await this.lessonModel.findOne({ cdnVideoId: videoId });
     if (!lesson || !lesson.isFree) {
       throw new ForbiddenException('Această lecție nu este disponibilă pentru preview gratuit');
     }
-    return this.buildSignedUrl(videoId);
+    return this.buildSignedUrl(videoId, clientIp);
   }
 
-  private buildSignedUrl(videoId: string): string {
-    const expiry = Math.floor(Date.now() / 1000) + 1 * 60 * 60; // 1 hour (reduced from 4h)
+  /**
+   * Build a Bunny.net signed playback URL.
+   * Binds the token to the requesting client IP (when available) so that a
+   * leaked URL cannot be replayed from a different network. Bunny's CDN
+   * extracts the actual client IP and recomputes the hash — if it doesn't
+   * match, the request is rejected. TTL is short (15 min) to further limit
+   * exposure; the player refreshes via /play-url when it expires.
+   */
+  private buildSignedUrl(videoId: string, clientIp?: string): string {
+    const expiry = Math.floor(Date.now() / 1000) + 15 * 60; // 15 min
     const path = `/${videoId}/playlist.m3u8`;
-    const hashInput = `${this.tokenKey}${path}${expiry}`;
+    const normalizedIp = this.bindTokenToIp ? this.normalizeIp(clientIp) : '';
+    const hashInput = normalizedIp
+      ? `${this.tokenKey}${path}${expiry}${normalizedIp}`
+      : `${this.tokenKey}${path}${expiry}`;
     const token = crypto
       .createHash('sha256')
       .update(hashInput)
@@ -161,6 +178,17 @@ export class MediaService {
       .toLowerCase();
 
     return `https://${this.cdnHostname}${path}?token=${token}&expires=${expiry}`;
+  }
+
+  /**
+   * Strip IPv4-mapped IPv6 prefix (e.g. "::ffff:1.2.3.4" → "1.2.3.4") and
+   * trim whitespace. Bunny expects the IP exactly as the CDN observes it.
+   */
+  private normalizeIp(ip?: string): string {
+    if (!ip) return '';
+    const trimmed = ip.trim();
+    if (trimmed.startsWith('::ffff:')) return trimmed.slice(7);
+    return trimmed;
   }
 
   /**
@@ -272,7 +300,9 @@ export class MediaService {
    */
   async isVideoOwnedByUser(videoId: string, userId: string): Promise<boolean> {
     const lesson = await this.lessonModel.findOne({ cdnVideoId: videoId }).lean();
-    if (!lesson) return true; // orphan video (not linked to any lesson) — allow deletion
+    // Orphan video (not linked to any lesson) — deny deletion for instructors;
+    // only admins can clean up orphaned assets via dedicated admin tools.
+    if (!lesson) return false;
     const course = await this.courseModel.findOne({
       _id: lesson.courseId,
       instructorId: new Types.ObjectId(userId),

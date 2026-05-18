@@ -21,6 +21,8 @@ import { CourseQueryDto } from './dto/course-query.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MediaService } from '../media/media.service';
 import { AppCacheService } from '../common/cache/app-cache.service';
+import { EnrollmentsService } from '../enrollments/enrollments.service';
+import { CACHE_TTL_MS } from '../common/constants/timings';
 
 @Injectable()
 export class CoursesService {
@@ -36,6 +38,7 @@ export class CoursesService {
     private notificationsService: NotificationsService,
     private mediaService: MediaService,
     private appCache: AppCacheService,
+    private enrollmentsService: EnrollmentsService,
   ) {}
 
   // ── Cache invalidation ───────────────────────────────────────────────────
@@ -59,9 +62,23 @@ export class CoursesService {
   // ── Courses ──────────────────────────────────────────────────────────────
 
   async findAll(query: CourseQueryDto, onlyPublished = true) {
-    // Cache only public (non-admin) course listings
+    // Cache only public (non-admin) course listings.
+    // Build a stable, deterministic key — JSON.stringify key order varies by
+    // how the DTO was constructed, causing cache misses for identical queries.
     const cacheKey = onlyPublished
-      ? `courses:list:${JSON.stringify(query)}`
+      ? [
+          'courses:list',
+          query.search ?? '',
+          query.category ?? '',
+          query.instructorId ?? '',
+          query.level ?? '',
+          query.minPrice ?? '',
+          query.maxPrice ?? '',
+          query.minRating ?? '',
+          query.sortBy ?? '',
+          query.page ?? 1,
+          query.limit ?? 12,
+        ].join(':')
       : null;
     if (cacheKey) {
       const cached = await this.appCache.get(cacheKey);
@@ -115,7 +132,7 @@ export class CoursesService {
     ]);
 
     const result = { courses, total, page, pages: Math.ceil(total / limit) };
-    if (cacheKey) await this.appCache.set(cacheKey, result, 300_000); // 5 min
+    if (cacheKey) await this.appCache.set(cacheKey, result, CACHE_TTL_MS.COURSE_DETAIL);
     return result;
   }
 
@@ -131,7 +148,7 @@ export class CoursesService {
       .exec();
     if (!course) throw new NotFoundException('Cursul nu a fost găsit');
 
-    await this.appCache.set(cacheKey, course, 300_000); // 5 min
+    await this.appCache.set(cacheKey, course, CACHE_TTL_MS.COURSE_DETAIL);
     return course;
   }
 
@@ -163,12 +180,21 @@ export class CoursesService {
     try {
       const saved = await course.save();
       await this.invalidateCourseCache();
+      // Auto-enroll the instructor and all admins
+      await Promise.all([
+        this.enrollmentsService.autoEnrollOwner(instructorId, saved._id.toString()),
+        this.enrollmentsService.autoEnrollAdmins(saved._id.toString()),
+      ]).catch(() => {});
       return saved;
     } catch (err: any) {
       if (err?.code === 11000 && err?.keyPattern?.slug) {
         course.slug = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
         const saved = await course.save();
         await this.invalidateCourseCache();
+        await Promise.all([
+          this.enrollmentsService.autoEnrollOwner(instructorId, saved._id.toString()),
+          this.enrollmentsService.autoEnrollAdmins(saved._id.toString()),
+        ]).catch(() => {});
         return saved;
       }
       throw err;
@@ -224,7 +250,7 @@ export class CoursesService {
         cdnVideoId?: string;
         duration?: number;
         isFree?: boolean;
-        questions?: Array<{ question: string; options: string[]; correctIndex: number }>;
+        questions?: Array<{ question: string; options: string[]; correctIndexes: number[] }>;
       }>;
     }>,
     userId: string,
@@ -333,6 +359,9 @@ export class CoursesService {
       this.invalidateCurriculumCache(id),
     ]);
 
+    // Auto-enroll the instructor in their own course (one-time, at publish)
+    await this.enrollmentsService.autoEnrollOwner(course.instructorId.toString(), id).catch(() => {});
+
     // Notify enrolled users only after the new version is live
     await this.notificationsService.notifyEnrolledUsers(
       id,
@@ -356,34 +385,80 @@ export class CoursesService {
         cdnVideoId?: string;
         duration?: number;
         isFree?: boolean;
-        questions?: Array<{ question: string; options: string[]; correctIndex: number }>;
+        questions?: Array<{ question: string; options: string[]; correctIndexes: number[] }>;
       }>;
     }>,
   ): Promise<void> {
     const cid = new Types.ObjectId(courseId);
-    const keptSectionIds: Types.ObjectId[] = [];
-    const keptLessonIds: Types.ObjectId[] = [];
+
+    // ── Step 0: IDOR validation — verify all provided sectionIds/lessonIds belong to this course ──
+    const incomingSectionIds = pendingSections
+      .filter((ps) => !!ps.sectionId)
+      .map((ps) => new Types.ObjectId(ps.sectionId!));
+    if (incomingSectionIds.length > 0) {
+      const validCount = await this.sectionModel.countDocuments({
+        _id: { $in: incomingSectionIds },
+        courseId: cid,
+      });
+      if (validCount !== incomingSectionIds.length) {
+        throw new ForbiddenException('Una sau mai multe secțiuni nu aparțin acestui curs');
+      }
+    }
+    const incomingLessonIds = pendingSections
+      .flatMap((ps) => ps.lessons)
+      .filter((pl) => !!pl.lessonId)
+      .map((pl) => new Types.ObjectId(pl.lessonId!));
+    if (incomingLessonIds.length > 0) {
+      const validCount = await this.lessonModel.countDocuments({
+        _id: { $in: incomingLessonIds },
+        courseId: cid,
+      });
+      if (validCount !== incomingLessonIds.length) {
+        throw new ForbiddenException('Una sau mai multe lecții nu aparțin acestui curs');
+      }
+    }
+
+    // ── Step 1: Resolve section IDs (batch updates + batch inserts in parallel) ──
+    const sectionIdMap: string[] = new Array(pendingSections.length);
+    const sectionBulkOps: any[] = [];
+    const newSectionIndices: number[] = [];
+    const newSectionDocs: any[] = [];
 
     for (let i = 0; i < pendingSections.length; i++) {
       const ps = pendingSections[i];
-      let sectionDbId: string;
-
       if (ps.sectionId) {
-        const updated = await this.sectionModel.findByIdAndUpdate(ps.sectionId, { title: ps.title, order: i });
-        if (updated) {
-          sectionDbId = ps.sectionId;
-        } else {
-          const newSection = new this.sectionModel({ courseId: cid, title: ps.title, order: i });
-          await newSection.save();
-          sectionDbId = (newSection._id as Types.ObjectId).toString();
-        }
+        sectionIdMap[i] = ps.sectionId;
+        sectionBulkOps.push({
+          updateOne: {
+            filter: { _id: new Types.ObjectId(ps.sectionId) },
+            update: { $set: { title: ps.title, order: i } },
+          },
+        });
       } else {
-        const newSection = new this.sectionModel({ courseId: cid, title: ps.title, order: i });
-        await newSection.save();
-        sectionDbId = (newSection._id as Types.ObjectId).toString();
+        newSectionIndices.push(i);
+        newSectionDocs.push({ courseId: cid, title: ps.title, order: i });
       }
+    }
 
-      keptSectionIds.push(new Types.ObjectId(sectionDbId));
+    const [, insertedSections] = await Promise.all([
+      sectionBulkOps.length > 0 ? this.sectionModel.bulkWrite(sectionBulkOps) : Promise.resolve(),
+      newSectionDocs.length > 0 ? this.sectionModel.insertMany(newSectionDocs) : Promise.resolve([]),
+    ]);
+
+    for (let k = 0; k < newSectionIndices.length; k++) {
+      sectionIdMap[newSectionIndices[k]] = ((insertedSections as any[])[k]._id as Types.ObjectId).toString();
+    }
+
+    const keptSectionIds = sectionIdMap.map((id) => new Types.ObjectId(id));
+
+    // ── Step 2: Resolve lesson IDs (batch updates + batch inserts in parallel) ──
+    const keptLessonIds: Types.ObjectId[] = [];
+    const lessonBulkOps: any[] = [];
+    const newLessonDocs: any[] = [];
+
+    for (let i = 0; i < pendingSections.length; i++) {
+      const ps = pendingSections[i];
+      const sectionObjId = new Types.ObjectId(sectionIdMap[i]);
 
       for (let j = 0; j < ps.lessons.length; j++) {
         const pl = ps.lessons[j];
@@ -398,32 +473,58 @@ export class CoursesService {
           order: j,
         };
 
-        let lessonDbId: Types.ObjectId;
         if (pl.lessonId) {
-          const updated = await this.lessonModel.findByIdAndUpdate(pl.lessonId, lessonData);
-          if (updated) {
-            lessonDbId = new Types.ObjectId(pl.lessonId);
-          } else {
-            const newLesson = new this.lessonModel({ courseId: cid, sectionId: new Types.ObjectId(sectionDbId), ...lessonData });
-            await newLesson.save();
-            lessonDbId = newLesson._id as Types.ObjectId;
-          }
+          keptLessonIds.push(new Types.ObjectId(pl.lessonId));
+          lessonBulkOps.push({
+            updateOne: {
+              filter: { _id: new Types.ObjectId(pl.lessonId) },
+              update: { $set: lessonData },
+            },
+          });
         } else {
-          const newLesson = new this.lessonModel({ courseId: cid, sectionId: new Types.ObjectId(sectionDbId), ...lessonData });
-          await newLesson.save();
-          lessonDbId = newLesson._id as Types.ObjectId;
+          newLessonDocs.push({ courseId: cid, sectionId: sectionObjId, ...lessonData });
         }
-        keptLessonIds.push(lessonDbId);
       }
     }
 
-    // Delete lessons and sections removed from the curriculum
+    const [, insertedLessons] = await Promise.all([
+      lessonBulkOps.length > 0 ? this.lessonModel.bulkWrite(lessonBulkOps) : Promise.resolve(),
+      newLessonDocs.length > 0 ? this.lessonModel.insertMany(newLessonDocs) : Promise.resolve([]),
+    ]);
+
+    for (const doc of (insertedLessons as any[])) {
+      keptLessonIds.push(doc._id as Types.ObjectId);
+    }
+
+    // ── Step 3: Delete removed lessons and sections (parallel) ───────────────
     const removedLessons = await this.lessonModel
       .find({ courseId: cid, _id: { $nin: keptLessonIds } })
-      .select('cdnVideoId')
+      .select('_id cdnVideoId')
       .lean();
-    await this.lessonModel.deleteMany({ courseId: cid, _id: { $nin: keptLessonIds } });
-    await this.sectionModel.deleteMany({ courseId: cid, _id: { $nin: keptSectionIds } });
+    const removedLessonIds = removedLessons.map((l) => l._id as Types.ObjectId);
+
+    await Promise.all([
+      this.lessonModel.deleteMany({ courseId: cid, _id: { $nin: keptLessonIds } }),
+      this.sectionModel.deleteMany({ courseId: cid, _id: { $nin: keptSectionIds } }),
+    ]);
+
+    // ── Step 3b: Scrub references to deleted lessons from enrollments ────────
+    // Without this, completedLessons keeps dangling IDs that no longer exist,
+    // silently invalidating the "X of Y completed" math (and any certificate
+    // already issued whose progress percent is recomputed). Pull them, and if
+    // a completedAt was set against a now-shorter curriculum re-evaluate it.
+    if (removedLessonIds.length > 0) {
+      await this.enrollmentModel.updateMany(
+        { courseId: cid, completedLessons: { $in: removedLessonIds } },
+        {
+          $pull: {
+            completedLessons: { $in: removedLessonIds },
+            quizAttempts: { quizId: { $in: removedLessonIds } },
+          },
+        },
+      );
+    }
+
     // Fire-and-forget CDN cleanup — don't fail the publish if CDN deletion errors
     for (const lesson of removedLessons) {
       if (lesson.cdnVideoId) {
@@ -480,6 +581,24 @@ export class CoursesService {
       .exec();
     if (!course) throw new NotFoundException('Cursul nu a fost găsit');
     const wasPublished = course.published;
+
+    // Validate required fields before publishing (not when unpublishing)
+    if (!wasPublished) {
+      const missing: string[] = [];
+      if (!course.title?.trim()) missing.push('titlu');
+      if (!course.description?.trim()) missing.push('descriere');
+      if (course.price == null || course.price < 0) missing.push('preț');
+      if (!course.categoryId) missing.push('categorie');
+      if (!course.thumbnail?.trim()) missing.push('imagine de copertă');
+      const sectionCount = await this.sectionModel.countDocuments({ courseId: course._id });
+      if (sectionCount === 0) missing.push('curriculum (cel puțin o secțiune)');
+      if (missing.length) {
+        throw new BadRequestException(
+          `Nu poți publica cursul fără: ${missing.join(', ')}.`,
+        );
+      }
+    }
+
     course.published = !course.published;
     const saved = await course.save();
     await this.invalidateCourseCache(saved.slug);
@@ -554,7 +673,7 @@ export class CoursesService {
       .populate('instructorId', 'name')
       .lean();
 
-    await this.appCache.set(cacheKey, courses, 900_000); // 15 min
+    await this.appCache.set(cacheKey, courses, CACHE_TTL_MS.COURSE_LIST);
     return courses as any;
   }
 
@@ -566,6 +685,18 @@ export class CoursesService {
     if (!course) throw new NotFoundException('Cursul nu a fost găsit');
 
     const courseId = course._id;
+
+    // Block hard-delete if there are paid orders — preserves financial history.
+    // Admin must refund those orders first, or simply unpublish the course.
+    const paidOrders = await this.orderModel.countDocuments({
+      'items.courseId': courseId,
+      status: 'paid',
+    });
+    if (paidOrders > 0) {
+      throw new BadRequestException(
+        `Cursul are ${paidOrders} comenzi plătite. Rambursează-le mai întâi sau depublicază cursul.`,
+      );
+    }
 
     // Faza 1: notificări (înainte de ștergere, avem nevoie de datele existente)
     await Promise.all([
@@ -671,6 +802,13 @@ export class CoursesService {
   }
 
   async createLesson(sectionId: string, courseId: string, data: Partial<Lesson>): Promise<LessonDocument> {
+    // Ensure the section belongs to this course — prevents IDOR across courses
+    const sectionExists = await this.sectionModel.exists({
+      _id: new Types.ObjectId(sectionId),
+      courseId: new Types.ObjectId(courseId),
+    });
+    if (!sectionExists) throw new NotFoundException('Secțiunea nu aparține acestui curs');
+
     const count = await this.lessonModel.countDocuments({ sectionId });
     const lesson = new this.lessonModel({
       ...data,
@@ -728,14 +866,14 @@ export class CoursesService {
       .lean()
       .exec();
 
-    // Strip correctIndex from quiz questions for students
+    // Strip correctIndexes from quiz questions for students
     const sanitizedLessons = includeCorrectAnswers
       ? lessons
       : lessons.map((l) => {
           if (l.type !== 'quiz' || !l.questions?.length) return l;
           return {
             ...l,
-            questions: (l.questions as any[]).map(({ correctIndex: _ci, ...q }) => q),
+            questions: (l.questions as any[]).map(({ correctIndexes: _ci, correctIndex: _old, ...q }) => q),
           };
         });
 
@@ -746,7 +884,7 @@ export class CoursesService {
       ),
     }));
 
-    if (cacheKey) await this.appCache.set(cacheKey, curriculum, 300_000); // 5 min
+    if (cacheKey) await this.appCache.set(cacheKey, curriculum, CACHE_TTL_MS.COURSE_DETAIL);
     return curriculum;
   }
 
@@ -767,8 +905,27 @@ export class CoursesService {
   async createQuiz(
     courseId: string,
     sectionId: string,
-    data: { title: string; questions: { question: string; options: string[]; correctIndex: number }[] },
+    data: { title: string; questions: { question: string; options: string[]; correctIndexes: number[] }[] },
   ): Promise<LessonDocument> {
+    // Validate correctIndexes are within options bounds for each question
+    const questions = data.questions ?? [];
+    for (const q of questions) {
+      for (const idx of q.correctIndexes) {
+        if (idx >= q.options.length) {
+          throw new BadRequestException(
+            `Indexul răspunsului corect (${idx}) depășește numărul de opțiuni (${q.options.length}) pentru întrebarea "${q.question}"`,
+          );
+        }
+      }
+    }
+
+    // Ensure the section belongs to this course — prevents IDOR across courses
+    const sectionExists = await this.sectionModel.exists({
+      _id: new Types.ObjectId(sectionId),
+      courseId: new Types.ObjectId(courseId),
+    });
+    if (!sectionExists) throw new NotFoundException('Secțiunea nu aparține acestui curs');
+
     const count = await this.lessonModel.countDocuments({ sectionId: new Types.ObjectId(sectionId) });
     const quiz = new this.lessonModel({
       courseId: new Types.ObjectId(courseId),
@@ -783,8 +940,21 @@ export class CoursesService {
 
   async updateQuiz(
     quizId: string,
-    data: Partial<{ title: string; order: number; questions: { question: string; options: string[]; correctIndex: number }[] }>,
+    data: Partial<{ title: string; order: number; questions: { question: string; options: string[]; correctIndexes: number[] }[] }>,
   ): Promise<LessonDocument> {
+    // Validate correctIndexes are within options bounds for each question
+    if (data.questions) {
+      for (const q of data.questions) {
+        for (const idx of q.correctIndexes) {
+          if (idx >= q.options.length) {
+            throw new BadRequestException(
+              `Indexul răspunsului corect (${idx}) depășește numărul de opțiuni (${q.options.length}) pentru întrebarea "${q.question}"`,
+            );
+          }
+        }
+      }
+    }
+
     const quiz = await this.lessonModel.findByIdAndUpdate(
       quizId,
       { $set: data },

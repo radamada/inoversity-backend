@@ -81,7 +81,9 @@ export class CouponsService {
 
   async validate(code: string, orderTotal: number): Promise<CouponValidationResult> {
     const normalizedCode = code.trim().toUpperCase();
-    const coupon = await this.couponModel.findOne({ code: normalizedCode }).lean();
+    const coupon = await this.couponModel
+      .findOne({ code: normalizedCode, deletedAt: null })
+      .lean();
 
     if (!coupon || !coupon.isActive) {
       throw new BadRequestException('Codul de reducere nu este valid sau a expirat');
@@ -131,44 +133,72 @@ export class CouponsService {
   ): Promise<{ discountAmount: number; usedAt: Date | null }> {
     const normalizedCode = code.trim().toUpperCase();
     const now = new Date();
+    const userObjId = userId ? new Types.ObjectId(userId) : null;
+
+    // Atomic guard: filter enforces maxUses AND maxUsesPerUser in the same single-doc
+    // update, so concurrent requests cannot all pass a post-hoc check. Without the
+    // per-user limit in the filter, parallel requests would each succeed → over-use.
+    const filter: Record<string, any> = {
+      code: normalizedCode,
+      isActive: true,
+      deletedAt: null,
+      $and: [
+        { $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }] },
+        { $or: [{ maxUses: null }, { $expr: { $lt: ['$usedCount', '$maxUses'] } }] },
+      ],
+    };
+    if (userObjId) {
+      filter.$and.push({
+        $or: [
+          { maxUsesPerUser: null },
+          {
+            $expr: {
+              $lt: [
+                {
+                  $size: {
+                    $filter: {
+                      input: { $ifNull: ['$usages', []] },
+                      as: 'u',
+                      cond: { $eq: ['$$u.userId', userObjId] },
+                    },
+                  },
+                },
+                '$maxUsesPerUser',
+              ],
+            },
+          },
+        ],
+      });
+    }
 
     const coupon = await this.couponModel.findOneAndUpdate(
-      {
-        code: normalizedCode,
-        isActive: true,
-        $and: [
-          { $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }] },
-          { $or: [{ maxUses: null }, { $expr: { $lt: ['$usedCount', '$maxUses'] } }] },
-        ],
-      },
+      filter,
       {
         $inc: { usedCount: 1 },
-        ...(userId ? { $push: { usages: { userId: new Types.ObjectId(userId), usedAt: now } } } : {}),
+        ...(userObjId ? { $push: { usages: { userId: userObjId, usedAt: now } } } : {}),
       },
-      { new: true }, // post-update document so concurrent requests see the correct count
+      { new: true },
     ).lean();
 
     if (!coupon) {
-      throw new BadRequestException('Codul de reducere nu este valid sau a expirat');
-    }
-
-    // Per-user limit check against post-update usages — handles concurrent requests correctly
-    if (userId && coupon.maxUsesPerUser !== null && coupon.maxUsesPerUser !== undefined) {
-      const userUsageCount = (coupon.usages ?? []).filter(
-        (u) => u.userId.toString() === userId,
-      ).length;
-      if (userUsageCount > coupon.maxUsesPerUser) {
-        // Roll back: pull the exact entry we just pushed (identified by userId + usedAt timestamp)
-        // using $pull with exact match is safe — concurrent entries have different usedAt values
-        await this.couponModel.updateOne(
-          { code: normalizedCode },
-          {
-            $inc: { usedCount: -1 },
-            $pull: { usages: { userId: new Types.ObjectId(userId), usedAt: now } },
-          },
-        );
-        throw new BadRequestException('Ai atins limita de utilizări pentru acest cod');
+      // Filter failed: either coupon invalid/expired, global cap hit, or per-user cap hit.
+      // Distinguish per-user cap with a follow-up read so the message is accurate.
+      if (userObjId) {
+        const existing = await this.couponModel.findOne({ code: normalizedCode }).lean();
+        if (
+          existing?.isActive &&
+          existing.maxUsesPerUser !== null &&
+          existing.maxUsesPerUser !== undefined
+        ) {
+          const userUsageCount = (existing.usages ?? []).filter(
+            (u) => u.userId.toString() === userId,
+          ).length;
+          if (userUsageCount >= existing.maxUsesPerUser) {
+            throw new BadRequestException('Ai atins limita de utilizări pentru acest cod');
+          }
+        }
       }
+      throw new BadRequestException('Codul de reducere nu este valid sau a expirat');
     }
 
     // Course-scoped coupon: must have that specific course in cart
@@ -268,7 +298,7 @@ export class CouponsService {
 
   async findAll(limit = 200): Promise<CouponDocument[]> {
     return this.couponModel
-      .find()
+      .find({ deletedAt: null })
       .populate('instructorId', 'name email role')
       .populate('courseId', 'title slug')
       .sort({ createdAt: -1 })
@@ -277,9 +307,43 @@ export class CouponsService {
   }
 
   async update(id: string, dto: Partial<CreateCouponDto>): Promise<CouponDocument> {
+    const existing = await this.couponModel.findById(id).select('usedCount').lean();
+    if (!existing) throw new NotFoundException('Cuponul nu a fost găsit');
+
     const $set: Record<string, unknown> = { ...dto };
-    delete $set.random; // not a DB field
-    if ($set.code) $set.code = ($set.code as string).trim().toUpperCase();
+
+    // Strip fields that must NEVER be writable through the update API:
+    //   - random: not a DB field; if true would re-trigger code generation
+    //   - code: immutable for the life of the coupon (changing it breaks any
+    //     in-flight redemptions and corrupts audit trails on past orders)
+    //   - usedCount, usages, instructorId: server-controlled, no reason a client
+    //     should ever set them. (whitelist:true at the global pipe normally
+    //     strips unknowns, but `Partial<CreateCouponDto>` doesn't enumerate
+    //     these so they could slip through.)
+    delete $set.random;
+    delete $set.code;
+    delete (dto as any).usedCount;
+    delete (dto as any).usages;
+    delete (dto as any).instructorId;
+    delete ($set as any).usedCount;
+    delete ($set as any).usages;
+    delete ($set as any).instructorId;
+
+    // Once a coupon has been redeemed at least once, freezing the discount
+    // shape prevents retroactive rewriting of what users were promised.
+    if (existing.usedCount > 0) {
+      if ('discountType' in $set || 'discountValue' in $set) {
+        throw new BadRequestException(
+          'Nu poți modifica tipul sau valoarea reducerii după ce cuponul a fost folosit. Creează un cupon nou.',
+        );
+      }
+      if ('courseId' in $set) {
+        throw new BadRequestException(
+          'Nu poți schimba cursul restricționat după ce cuponul a fost folosit.',
+        );
+      }
+    }
+
     const coupon = await this.couponModel
       .findByIdAndUpdate(id, { $set }, { new: true })
       .exec();
@@ -288,8 +352,18 @@ export class CouponsService {
   }
 
   async remove(id: string): Promise<void> {
-    const result = await this.couponModel.findByIdAndDelete(id).exec();
-    if (!result) throw new NotFoundException('Cuponul nu a fost găsit');
+    const coupon = await this.couponModel.findById(id).select('usedCount').lean();
+    if (!coupon) throw new NotFoundException('Cuponul nu a fost găsit');
+
+    if (coupon.usedCount > 0) {
+      // Soft-delete: păstrăm documentul pentru audit-ul ordinelor istorice care
+      // referențiază couponCode. Setăm deletedAt → ascuns din liste & rejected
+      // de validate/apply.
+      await this.couponModel.updateOne({ _id: id }, { $set: { deletedAt: new Date(), isActive: false } });
+    } else {
+      // Cupon nefolosit — hard-delete e safe, eliberează codul pentru reutilizare.
+      await this.couponModel.findByIdAndDelete(id);
+    }
   }
 
   // ── Instructor: manage own coupons ─────────────────────────────────────────
@@ -300,7 +374,7 @@ export class CouponsService {
 
   async findByInstructor(instructorId: string): Promise<CouponDocument[]> {
     return this.couponModel
-      .find({ instructorId: new Types.ObjectId(instructorId) })
+      .find({ instructorId: new Types.ObjectId(instructorId), deletedAt: null })
       .populate('courseId', 'title slug')
       .sort({ createdAt: -1 })
       .exec();
@@ -313,7 +387,7 @@ export class CouponsService {
     isAdmin: boolean,
   ): Promise<CouponDocument> {
     const coupon = await this.couponModel.findById(id).lean();
-    if (!coupon) throw new NotFoundException('Cuponul nu a fost găsit');
+    if (!coupon || coupon.deletedAt) throw new NotFoundException('Cuponul nu a fost găsit');
     if (!isAdmin && coupon.instructorId?.toString() !== instructorId) {
       throw new ForbiddenException('Nu ai permisiunea să modifici acest cupon');
     }
@@ -322,11 +396,12 @@ export class CouponsService {
 
   async removeForInstructor(id: string, instructorId: string, isAdmin: boolean): Promise<void> {
     const coupon = await this.couponModel.findById(id).lean();
-    if (!coupon) throw new NotFoundException('Cuponul nu a fost găsit');
+    if (!coupon || coupon.deletedAt) throw new NotFoundException('Cuponul nu a fost găsit');
     if (!isAdmin && coupon.instructorId?.toString() !== instructorId) {
       throw new ForbiddenException('Nu ai permisiunea să ștergi acest cupon');
     }
-    await this.couponModel.findByIdAndDelete(id);
+    // Delegate to .remove() so soft-vs-hard delete logic stays in one place.
+    await this.remove(id);
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────

@@ -19,4 +19,7 @@ export class Note {
 }
 
 export const NoteSchema = SchemaFactory.createForClass(Note);
+// Unique constraint: one note per (user, course, lesson)
 NoteSchema.index({ userId: 1, courseId: 1, lessonId: 1 }, { unique: true });
+// Covers getCourseNotes query: filter by (userId, courseId) + sort by updatedAt desc
+NoteSchema.index({ userId: 1, courseId: 1, updatedAt: -1 });

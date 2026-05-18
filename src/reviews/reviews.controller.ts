@@ -2,10 +2,13 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Body,
   Param,
   Query,
   UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
@@ -16,6 +19,8 @@ import { ReviewsService } from './reviews.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 
 class CreateReviewDto {
   @ApiProperty({ minimum: 1, maximum: 5 })
@@ -72,5 +77,18 @@ export class ReviewsController {
       dto.rating,
       dto.comment ?? '',
     );
+  }
+
+  /**
+   * Admin: delete an abusive review and recalc the course rating in one
+   * transactional step. Direct DB deletion would leave course.rating stale.
+   */
+  @Delete(':reviewId')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async remove(@Param('reviewId', ParseObjectIdPipe) reviewId: string) {
+    await this.reviewsService.deleteAsAdmin(reviewId);
   }
 }

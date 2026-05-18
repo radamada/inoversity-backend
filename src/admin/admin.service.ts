@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { User, UserDocument } from '../users/schemas/user.schema';
@@ -44,9 +44,14 @@ export class AdminService {
     return this.usersService.findAll(page, limit, search);
   }
 
-  setUserRole(id: string, role: string, adminId?: string) {
+  async setUserRole(id: string, role: string, adminId?: string): Promise<UserDocument> {
     if (adminId && id === adminId.toString()) {
       throw new BadRequestException('Nu îți poți schimba propriul rol');
+    }
+    const target = await this.userModel.findById(id).select('role').lean().exec();
+    if (!target) throw new NotFoundException('Utilizatorul nu a fost găsit');
+    if (target.role === 'admin') {
+      throw new BadRequestException('Rolul unui administrator nu poate fi modificat');
     }
     return this.usersService.setRole(id, role);
   }
@@ -58,13 +63,17 @@ export class AdminService {
     return this.usersService.setActive(id, isActive);
   }
 
-  setRevenueShare(id: string, percent: number) {
+  async setRevenueShare(id: string, percent: number): Promise<UserDocument> {
+    const target = await this.userModel.findById(id).exec();
+    if (!target) throw new NotFoundException('Utilizatorul nu a fost găsit');
+    if (target.role !== 'instructor') {
+      throw new BadRequestException('Comisionul poate fi setat doar pentru formatori');
+    }
     const clamped = Math.min(100, Math.max(0, Math.round(percent)));
-    return this.userModel.findByIdAndUpdate(
-      id,
-      { $set: { revenueSharePercent: clamped } },
-      { new: true },
-    ).select('-passwordHash').lean();
+    const user = await this.userModel
+      .findByIdAndUpdate(id, { $set: { revenueSharePercent: clamped } }, { new: true })
+      .exec();
+    return user!;
   }
 
   getMonthlyRevenue() {
@@ -131,13 +140,20 @@ export class AdminService {
     return this.ordersService.refund(orderId, adminId);
   }
 
-  async getInstructors() {
-    return this.userModel
-      .find({ role: 'instructor' })
-      .select('_id name email')
-      .sort({ name: 1 })
-      .lean()
-      .exec();
+  async getInstructors(page = 1, limit = 50) {
+    const skip = (page - 1) * limit;
+    const [instructors, total] = await Promise.all([
+      this.userModel
+        .find({ role: 'instructor' })
+        .select('_id name email')
+        .sort({ name: 1 })
+        .skip(skip)
+        .limit(limit)
+        .lean()
+        .exec(),
+      this.userModel.countDocuments({ role: 'instructor' }),
+    ]);
+    return { instructors, total, page, pages: Math.ceil(total / limit) };
   }
 
   async getCoursesList(instructorId?: string) {

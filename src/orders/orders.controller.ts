@@ -3,12 +3,15 @@ import {
   Get,
   Post,
   Param,
+  Query,
   Body,
   UseGuards,
   HttpCode,
   HttpStatus,
   ForbiddenException,
 } from '@nestjs/common';
+import { Type } from 'class-transformer';
+import { IsInt, Min, Max } from 'class-validator';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { IsOptional, IsString, MaxLength, Matches } from 'class-validator';
 import { Throttle } from '@nestjs/throttler';
@@ -19,11 +22,28 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 
+class OrdersQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number = 20;
+}
+
 class CreateOrderDto {
   @IsOptional()
   @IsString()
   @MaxLength(50, { message: 'Codul de cupon poate avea maxim 50 de caractere' })
-  @Matches(/^[A-Z0-9_-]*$/, { message: 'Cod de cupon invalid' })
+  // `+` not `*` — a present-but-empty code is a client bug, not "no coupon".
+  // (Service layer also early-returns on empty string, but reject at the edge.)
+  @Matches(/^[A-Z0-9_-]+$/, { message: 'Cod de cupon invalid' })
   couponCode?: string;
 }
 
@@ -52,17 +72,18 @@ export class OrdersController {
     @CurrentUser() user: any,
     @Body() dto: CreateOrderDto,
   ) {
-    // Block in production AND when NODE_ENV is not explicitly 'development'
-    // (undefined counts as non-dev to fail secure)
-    if (process.env.NODE_ENV === 'production') {
+    // Block unless NODE_ENV is explicitly 'development'.
+    // Checking !== 'development' (not === 'production') ensures that
+    // undefined / staging / test all fail secure.
+    if (process.env.NODE_ENV !== 'development') {
       throw new ForbiddenException('Endpoint indisponibil în producție');
     }
     return this.ordersService.createAndPayFake(user._id.toString(), dto.couponCode);
   }
 
   @Get()
-  getMyOrders(@CurrentUser() user: any) {
-    return this.ordersService.getMyOrders(user._id.toString());
+  getMyOrders(@CurrentUser() user: any, @Query() query: OrdersQueryDto) {
+    return this.ordersService.getMyOrders(user._id.toString(), query.page, query.limit);
   }
 
   @Get(':id')

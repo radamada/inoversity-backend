@@ -11,6 +11,7 @@ import {
   UploadedFile,
   BadRequestException,
   HttpCode,
+  Ip,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -22,6 +23,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 
 @ApiTags('Media')
 @ApiBearerAuth()
@@ -128,14 +130,15 @@ export class MediaController {
 
   @Get('play-url/:videoId')
   @Throttle({ default: { ttl: 60000, limit: 30 } })
-  @ApiOperation({ summary: 'URL semnat pentru redare video (acces protejat)' })
+  @ApiOperation({ summary: 'URL semnat pentru redare video (acces protejat, legat de IP)' })
   getPlayUrl(
     @Param('videoId') videoId: string,
-    @Query('courseId') courseId: string,
+    @Query('courseId', ParseObjectIdPipe) courseId: string,
     @CurrentUser() user: any,
+    @Ip() ip: string,
   ) {
     return this.mediaService
-      .getSignedPlayUrl(videoId, user._id.toString(), courseId)
+      .getSignedPlayUrl(videoId, user._id.toString(), courseId, ip)
       .then((url) => ({ url }));
   }
 }
@@ -147,9 +150,9 @@ export class PublicMediaController {
 
   @Get('preview-url/:videoId')
   @Throttle({ default: { ttl: 60000, limit: 30 } })
-  @ApiOperation({ summary: 'URL semnat pentru preview lecție gratuită (fără autentificare)' })
-  async getPreviewUrl(@Param('videoId') videoId: string) {
-    const url = await this.mediaService.getPreviewUrlForFreeLesson(videoId);
+  @ApiOperation({ summary: 'URL semnat pentru preview lecție gratuită (legat de IP)' })
+  async getPreviewUrl(@Param('videoId') videoId: string, @Ip() ip: string) {
+    const url = await this.mediaService.getPreviewUrlForFreeLesson(videoId, ip);
     return { url };
   }
 }

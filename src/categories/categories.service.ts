@@ -3,7 +3,9 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import slugify from 'slugify';
 import { Category, CategoryDocument } from './schemas/category.schema';
+import { Course, CourseDocument } from '../courses/schemas/course.schema';
 import { AppCacheService } from '../common/cache/app-cache.service';
+import { CACHE_TTL_MS } from '../common/constants/timings';
 
 @Injectable()
 export class CategoriesService {
@@ -11,6 +13,7 @@ export class CategoriesService {
 
   constructor(
     @InjectModel(Category.name) private categoryModel: Model<CategoryDocument>,
+    @InjectModel(Course.name) private courseModel: Model<CourseDocument>,
     private appCache: AppCacheService,
   ) {}
 
@@ -19,7 +22,7 @@ export class CategoriesService {
     if (cached) return cached;
 
     const categories = await this.categoryModel.find().sort({ name: 1 }).exec();
-    await this.appCache.set(this.CACHE_KEY, categories, 3_600_000); // 1 hour
+    await this.appCache.set(this.CACHE_KEY, categories, CACHE_TTL_MS.CATEGORIES);
     return categories;
   }
 
@@ -33,6 +36,11 @@ export class CategoriesService {
 
   async delete(id: string): Promise<void> {
     await this.categoryModel.findByIdAndDelete(id);
+    // Remove the deleted category reference from all courses that still reference it
+    await this.courseModel.updateMany(
+      { categoryId: id },
+      { $unset: { categoryId: '' } },
+    );
     await this.appCache.del(this.CACHE_KEY);
   }
 }

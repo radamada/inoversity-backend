@@ -4,6 +4,7 @@ import { OriginValidationMiddleware } from './common/middleware/origin-validatio
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { CoursesModule } from './courses/courses.module';
@@ -34,6 +35,9 @@ import { AppCacheModule } from './common/cache/app-cache.module';
 
     // Rate limiting
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
+
+    // Cron jobs
+    ScheduleModule.forRoot(),
 
     // MongoDB
     MongooseModule.forRootAsync({
