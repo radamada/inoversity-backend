@@ -464,7 +464,7 @@ export class EnrollmentsService {
 
       // Numele platformei sus în bandă
       doc.fillColor('#B0D5EA').fontSize(10.5).font('Regular')
-        .text('EduInovatrium', 0, 24, { width: S, align: 'center', lineBreak: false });
+        .text('Inoversity', 0, 24, { width: S, align: 'center', lineBreak: false });
 
       // Liniuțe decorative sub titlu în bandă
       doc.moveTo(28, 46).lineTo(S - 28, 46).lineWidth(0.4).strokeColor('#427AA1').stroke();
@@ -506,7 +506,7 @@ export class EnrollmentsService {
       // Footer bandă stânga
       doc.rect(0, H - 26, S, 26).fill('#1e1b4b');
       doc.fillColor('#427AA1').fontSize(7).font('Regular')
-        .text('© ' + new Date().getFullYear() + ' EduInovatrium', 0, H - 16, { width: S, align: 'center', lineBreak: false });
+        .text('© ' + new Date().getFullYear() + ' Inoversity', 0, H - 16, { width: S, align: 'center', lineBreak: false });
 
       // Separator vertical (dungă accent între bandă și conținut)
       doc.rect(S, 0, 4, H).fill('#427AA1');
@@ -556,7 +556,7 @@ export class EnrollmentsService {
       const sigY = 390;
       doc.moveTo(RCX - 90, sigY).lineTo(RCX + 90, sigY).lineWidth(0.5).strokeColor('#d1d5db').stroke();
       doc.fillColor('#374151').fontSize(10).font('Bold')
-        .text('EduInovatrium', RCX - 90, sigY + 8, { width: 180, align: 'center', lineBreak: false });
+        .text('Inoversity', RCX - 90, sigY + 8, { width: 180, align: 'center', lineBreak: false });
       doc.fillColor('#9ca3af').fontSize(8.5).font('Regular')
         .text('Platformă educațională autorizată', RCX - 90, sigY + 22, { width: 180, align: 'center', lineBreak: false });
 
@@ -567,7 +567,7 @@ export class EnrollmentsService {
       // Footer bandă dreapta
       doc.rect(RX, H - 28, W - RX, 28).fill('#eef2ff');
       doc.fillColor('#6AA1C8').fontSize(8).font('Regular')
-        .text('www.eduinovatrium.ro  ·  Certificat generat electronic', RX, H - 17, {
+        .text('www.inoversity.ro  ·  Certificat generat electronic', RX, H - 17, {
           width: RW, align: 'center', lineBreak: false,
         });
 

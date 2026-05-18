@@ -58,7 +58,7 @@ async function bootstrap() {
   const frontendUrlRaw = config.get<string>('FRONTEND_URL');
   if (isProd && !frontendUrlRaw) {
     throw new Error(
-      'FRONTEND_URL env var is required in production. Set it to the public origin of the frontend (e.g. https://eduinovatrium.ro) before starting the API.',
+      'FRONTEND_URL env var is required in production. Set it to the public origin of the frontend (e.g. https://inoversity.ro) before starting the API.',
     );
   }
   const frontendUrl = frontendUrlRaw ?? 'http://localhost:3000';
@@ -98,7 +98,7 @@ async function bootstrap() {
   // Swagger — available only in non-production environments
   if (config.get('NODE_ENV') !== 'production') {
     const swaggerConfig = new DocumentBuilder()
-      .setTitle('EduInovatrium API')
+      .setTitle('Inoversity API')
       .setDescription('Platformă cursuri online – API Documentation')
       .setVersion('1.0')
       .addBearerAuth()
@@ -111,6 +111,6 @@ async function bootstrap() {
 
   const port = config.get<number>('BACKEND_PORT', 3001);
   await app.listen(port);
-  logger.log(`EduInovatrium API running on http://localhost:${port}/api`, 'Bootstrap');
+  logger.log(`Inoversity API running on http://localhost:${port}/api`, 'Bootstrap');
 }
 bootstrap();
