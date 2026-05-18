@@ -83,7 +83,7 @@ async function bootstrap() {
   // Swagger — available only in non-production environments
   if (config.get('NODE_ENV') !== 'production') {
     const swaggerConfig = new DocumentBuilder()
-      .setTitle('EduInovatrium API')
+      .setTitle('Inoversity API')
       .setDescription('Platformă cursuri online – API Documentation')
       .setVersion('1.0')
       .addBearerAuth()
@@ -96,6 +96,6 @@ async function bootstrap() {
 
   const port = config.get<number>('BACKEND_PORT', 3001);
   await app.listen(port);
-  logger.log(`EduInovatrium API running on http://localhost:${port}/api`, 'Bootstrap');
+  logger.log(`Inoversity API running on http://localhost:${port}/api`, 'Bootstrap');
 }
 bootstrap();

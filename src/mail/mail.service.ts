@@ -31,21 +31,21 @@ export class MailService {
   async sendPasswordReset(to: string, token: string): Promise<void> {
     const frontendUrl = this.config.get('FRONTEND_URL', 'http://localhost:3000');
     const resetUrl = `${frontendUrl}/reset-password/${token}`;
-    const from = this.config.get('SMTP_FROM', 'EduInovatrium <noreply@eduinovatrium.ro>');
+    const from = this.config.get('SMTP_FROM', 'Inoversity <noreply@inoversity.ro>');
 
     try {
       await this.transporter.sendMail({
         from,
         to,
-        subject: 'Resetare parolă EduInovatrium',
+        subject: 'Resetare parolă Inoversity',
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background: linear-gradient(135deg, #4f46e5, #3730a3); padding: 32px; border-radius: 8px 8px 0 0;">
-              <h1 style="color: white; margin: 0; font-size: 24px;">EduInovatrium</h1>
+              <h1 style="color: white; margin: 0; font-size: 24px;">Inoversity</h1>
             </div>
             <div style="background: #f9fafb; padding: 32px; border-radius: 0 0 8px 8px; border: 1px solid #e5e7eb; border-top: none;">
               <h2 style="color: #111827; margin-top: 0;">Resetare parolă</h2>
-              <p style="color: #6b7280;">Ai solicitat resetarea parolei pentru contul tău EduInovatrium. Apasă butonul de mai jos pentru a seta o parolă nouă.</p>
+              <p style="color: #6b7280;">Ai solicitat resetarea parolei pentru contul tău Inoversity. Apasă butonul de mai jos pentru a seta o parolă nouă.</p>
               <div style="text-align: center; margin: 32px 0;">
                 <a href="${resetUrl}"
                    style="background: #4f46e5; color: white; padding: 12px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block;">
@@ -65,7 +65,7 @@ export class MailService {
   }
 
   async sendGoogleAccountNotice(to: string): Promise<void> {
-    const from = this.config.get('SMTP_FROM', 'EduInovatrium <noreply@eduinovatrium.ro>');
+    const from = this.config.get('SMTP_FROM', 'Inoversity <noreply@inoversity.ro>');
     const frontendUrl = this.config.get('FRONTEND_URL', 'http://localhost:3000');
     const loginUrl = `${frontendUrl}/login`;
 
@@ -73,16 +73,16 @@ export class MailService {
       await this.transporter.sendMail({
         from,
         to,
-        subject: 'Cont EduInovatrium — autentificare cu Google',
+        subject: 'Cont Inoversity — autentificare cu Google',
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background: linear-gradient(135deg, #4f46e5, #3730a3); padding: 32px; border-radius: 8px 8px 0 0;">
-              <h1 style="color: white; margin: 0; font-size: 24px;">EduInovatrium</h1>
+              <h1 style="color: white; margin: 0; font-size: 24px;">Inoversity</h1>
             </div>
             <div style="background: #f9fafb; padding: 32px; border-radius: 0 0 8px 8px; border: 1px solid #e5e7eb; border-top: none;">
               <h2 style="color: #111827; margin-top: 0;">Ai solicitat resetarea parolei</h2>
               <p style="color: #6b7280;">
-                Contul tău EduInovatrium este conectat prin <strong>Google</strong> și nu are o parolă setată.
+                Contul tău Inoversity este conectat prin <strong>Google</strong> și nu are o parolă setată.
                 Nu trebuie să îți resetezi parola — poți intra direct folosind butonul de mai jos.
               </p>
               <div style="text-align: center; margin: 32px 0;">
@@ -104,18 +104,18 @@ export class MailService {
   }
 
   async sendWelcome(to: string, name: string): Promise<void> {
-    const from = this.config.get('SMTP_FROM', 'EduInovatrium <noreply@eduinovatrium.ro>');
+    const from = this.config.get('SMTP_FROM', 'Inoversity <noreply@inoversity.ro>');
     const frontendUrl = this.config.get('FRONTEND_URL', 'http://localhost:3000');
 
     try {
       await this.transporter.sendMail({
         from,
         to,
-        subject: 'Bine ai venit pe EduInovatrium!',
+        subject: 'Bine ai venit pe Inoversity!',
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background: linear-gradient(135deg, #4f46e5, #3730a3); padding: 32px; border-radius: 8px 8px 0 0;">
-              <h1 style="color: white; margin: 0; font-size: 24px;">EduInovatrium</h1>
+              <h1 style="color: white; margin: 0; font-size: 24px;">Inoversity</h1>
             </div>
             <div style="background: #f9fafb; padding: 32px; border-radius: 0 0 8px 8px; border: 1px solid #e5e7eb; border-top: none;">
               <h2 style="color: #111827; margin-top: 0;">Bine ai venit, ${escapeHtml(name)}!</h2>
@@ -141,8 +141,8 @@ export class MailService {
     subject: string;
     message: string;
   }): Promise<void> {
-    const from = this.config.get('SMTP_FROM', 'EduInovatrium <noreply@eduinovatrium.ro>');
-    const to = this.config.get('CONTACT_EMAIL', 'admin@eduinovatrium.ro');
+    const from = this.config.get('SMTP_FROM', 'Inoversity <noreply@inoversity.ro>');
+    const to = this.config.get('CONTACT_EMAIL', 'admin@inoversity.ro');
 
     const safeName = escapeHtml(data.name);
     const safeEmail = escapeHtml(data.email);
@@ -153,11 +153,11 @@ export class MailService {
       from,
       replyTo: data.email,
       to,
-      subject: `[Contact EduInovatrium] ${data.subject}`,
+      subject: `[Contact Inoversity] ${data.subject}`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="background: linear-gradient(135deg, #4f46e5, #3730a3); padding: 32px; border-radius: 8px 8px 0 0;">
-            <h1 style="color: white; margin: 0; font-size: 24px;">EduInovatrium — Mesaj nou</h1>
+            <h1 style="color: white; margin: 0; font-size: 24px;">Inoversity — Mesaj nou</h1>
           </div>
           <div style="background: #f9fafb; padding: 32px; border-radius: 0 0 8px 8px; border: 1px solid #e5e7eb; border-top: none;">
             <p style="color: #374151;"><strong>De la:</strong> ${safeName} &lt;${safeEmail}&gt;</p>
