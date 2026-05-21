@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Patch, Post, Body, Param, Query,
+  Controller, Get, Patch, Post, Body, Param,
   UseGuards, UseInterceptors, UploadedFile, BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -69,9 +69,14 @@ export class UsersController {
     return { message: 'Un email de confirmare a fost trimis la adresa ta curentă' };
   }
 
-  @Get('email/confirm-old')
+  // Confirmarea schimbării de email se face prin POST (nu GET) pentru a preveni
+  // declanșarea accidentală de prefetchers, link previews, web crawlers, <img>
+  // tags sau alte mecanisme care emit GET-uri automate. FE-ul are pagini
+  // dedicate (/email-change/confirm-{old,new}) care fac POST-ul din useEffect.
+  @Post('email/confirm-old')
   @ApiOperation({ summary: 'Confirmă adresa veche de email (pasul 1)' })
-  async confirmOldEmail(@Query('token') token: string) {
+  async confirmOldEmail(@Body() body: { token?: string }) {
+    const token = body?.token;
     if (!token) throw new BadRequestException('Token lipsă');
     const { pendingEmail, token: sameToken } = await this.usersService.confirmOldEmailChange(token);
     // Trimite email la noua adresă — fire-and-forget
@@ -79,9 +84,10 @@ export class UsersController {
     return { message: 'Adresa curentă a fost confirmată. Verifică inbox-ul noii adrese de email.' };
   }
 
-  @Get('email/confirm-new')
+  @Post('email/confirm-new')
   @ApiOperation({ summary: 'Confirmă noua adresă de email (pasul 2)' })
-  async confirmNewEmail(@Query('token') token: string) {
+  async confirmNewEmail(@Body() body: { token?: string }) {
+    const token = body?.token;
     if (!token) throw new BadRequestException('Token lipsă');
     const { message, oldEmail } = await this.usersService.confirmNewEmailChange(token);
     // Notificăm adresa veche că schimbarea a fost finalizată
