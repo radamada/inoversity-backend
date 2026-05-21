@@ -66,6 +66,17 @@ export class UsersService {
     return user;
   }
 
+  /**
+   * Variant for the auth strategies (jwt + jwt-refresh) which need to compare
+   * the incoming JWT's tokenVersion against the user's current tokenVersion.
+   * Returns the userul with tokenVersion explicitly selected.
+   */
+  async findByIdForAuth(id: string): Promise<UserDocument> {
+    const user = await this.userModel.findById(id).select('+tokenVersion').exec();
+    if (!user) throw new NotFoundException('Utilizatorul nu a fost găsit');
+    return user;
+  }
+
   async updateProfile(id: string, dto: UpdateUserDto): Promise<UserDocument> {
     const user = await this.userModel
       .findByIdAndUpdate(id, { $set: dto }, { new: true })

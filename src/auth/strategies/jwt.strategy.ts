@@ -18,7 +18,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   async validate(payload: { sub: string; email: string; role: string; tokenVersion?: number }) {
-    const user = await this.usersService.findById(payload.sub);
+    const user = await this.usersService.findByIdForAuth(payload.sub);
     if (!user) throw new UnauthorizedException();
     if (!user.isActive) throw new UnauthorizedException('ACCOUNT_BLOCKED');
     // Invalidate access tokens issued before the last logout (token rotation)

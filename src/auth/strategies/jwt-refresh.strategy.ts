@@ -26,7 +26,7 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
     const token = (req as any).cookies?.[COOKIE_NAMES.refreshToken];
     if (!token) throw new UnauthorizedException();
 
-    const user = await this.usersService.findById(payload.sub);
+    const user = await this.usersService.findByIdForAuth(payload.sub);
     if (!user) throw new UnauthorizedException();
     if (!user.isActive) throw new UnauthorizedException('ACCOUNT_BLOCKED');
 

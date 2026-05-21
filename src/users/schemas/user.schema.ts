@@ -27,13 +27,18 @@ export class User {
   @Prop({ default: false })
   emailVerified: boolean;
 
-  @Prop({ type: String, default: null })
+  // Tokens & secrets — select:false ca să nu se scurgă prin findById direct sau
+  // alte endpoint-uri care întorc userul fără sanitizare explicită. Pentru
+  // citirile legitime (consum token la reset/confirm), filtrul de query
+  // funcționează indiferent de select; doar reads after-load au nevoie
+  // de `.select('+field')`.
+  @Prop({ type: String, default: null, select: false })
   emailVerificationToken: string | null;
 
-  @Prop({ type: String, default: null })
+  @Prop({ type: String, default: null, select: false })
   passwordResetToken: string | null;
 
-  @Prop({ type: Date, default: null })
+  @Prop({ type: Date, default: null, select: false })
   passwordResetExpires: Date | null;
 
   @Prop({ default: true })
@@ -52,8 +57,11 @@ export class User {
   @Prop({ type: String, required: false, default: null })
   googleId: string | null;
 
-  /** Incremented on logout to invalidate all existing refresh tokens */
-  @Prop({ default: 0 })
+  /** Incremented on logout to invalidate all existing refresh tokens.
+   *  select:false: nu trebuie să apară în /users/me sau /auth/me — e o stare
+   *  internă de auth. Cele 2 strategies (jwt + jwt-refresh) îl citesc explicit
+   *  prin findByIdForAuth(). */
+  @Prop({ default: 0, select: false })
   tokenVersion: number;
 
   /** Percentage of course revenue the instructor pays to the platform (0-100) */
@@ -65,10 +73,10 @@ export class User {
   pendingEmail: string | null;
 
   /** Token pentru fluxul de schimbare email (aceleași token pentru ambii pași) */
-  @Prop({ type: String, default: null })
+  @Prop({ type: String, default: null, select: false })
   emailChangeToken: string | null;
 
-  @Prop({ type: Date, default: null })
+  @Prop({ type: Date, default: null, select: false })
   emailChangeTokenExpires: Date | null;
 
   /** True după ce adresa veche a confirmat — pasul 1 din 2 */
