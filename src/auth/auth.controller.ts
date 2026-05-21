@@ -90,8 +90,12 @@ export class AuthController {
 
   /**
    * Google redirects back here after the user consents.
-   * Sets cookies and redirects the browser to the frontend callback page
-   * which reads the one-time access token from the URL and stores it in memory.
+   *
+   * SECURITY: nu mai trimitem JWT-ul în URL (`?token=...`) pentru că rămânea
+   * în browser history, Referer headers și log-uri server. În schimb emitem
+   * un cod single-use, short-lived (60s), pe care FE-ul îl schimbă pe tokens
+   * via POST /auth/google/exchange. Cookies-urile de refresh + user_role se
+   * setează DOAR la exchange, nu aici (codul singur nu ajunge la enrollment).
    */
   @Get('google/callback')
   @UseGuards(AuthGuard('google'))
@@ -103,18 +107,35 @@ export class AuthController {
     }
 
     try {
-      const result = await this.authService.loginWithGoogle(req.user);
-      this.setRefreshCookie(res, result.refreshToken);
-      this.setRoleCookie(res, result.user.role);
-      // Pass access token to frontend via URL — the callback page reads it
-      // immediately and removes it from the URL (replaceState) so it never
-      // sits in browser history.
+      if (!req.user.isActive) {
+        return (res as any).redirect(`${frontendUrl}/login?error=google_failed`);
+      }
+      const code = await this.authService.createGoogleAuthCode(req.user._id);
       (res as any).redirect(
-        `${frontendUrl}/auth/google/callback?token=${result.accessToken}`,
+        `${frontendUrl}/auth/google/callback?code=${code}`,
       );
     } catch {
       (res as any).redirect(`${frontendUrl}/login?error=google_failed`);
     }
+  }
+
+  /**
+   * Schimbă codul OAuth one-time pe tokens. Setează refresh_token + user_role
+   * cookies și returnează accessToken în body. Throttle agresiv: codurile au
+   * 60s TTL și sunt single-use, deci nu sunt necesare multe încercări/IP.
+   */
+  @Post('google/exchange')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
+  @ApiOperation({ summary: 'Schimbă codul OAuth Google pe tokens' })
+  async googleExchange(
+    @Body() body: { code?: string },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.exchangeGoogleAuthCode(body?.code ?? '');
+    this.setRefreshCookie(res, result.refreshToken);
+    this.setRoleCookie(res, result.user.role);
+    return { accessToken: result.accessToken, user: this.sanitizeUser(result.user) };
   }
 
   @Post('refresh')

@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { UsersService } from '../users/users.service';
@@ -13,6 +15,11 @@ import { MailService } from '../mail/mail.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { UserDocument } from '../users/schemas/user.schema';
+import { AuthCode, AuthCodeDocument } from './schemas/auth-code.schema';
+
+// TTL pentru codul OAuth single-use. Suficient pentru un redirect + 1 POST exchange,
+// dar suficient de scurt cât să facă inutilă recoltarea din browser history/logs.
+const AUTH_CODE_TTL_MS = 60 * 1000;
 
 @Injectable()
 export class AuthService {
@@ -21,6 +28,8 @@ export class AuthService {
     private jwtService: JwtService,
     private config: ConfigService,
     private mailService: MailService,
+    @InjectModel(AuthCode.name)
+    private authCodeModel: Model<AuthCodeDocument>,
   ) {
     if (!config.get('JWT_ACCESS_SECRET') || !config.get('JWT_REFRESH_SECRET')) {
       throw new InternalServerErrorException(
@@ -64,6 +73,42 @@ export class AuthService {
 
   /** Used by Google OAuth callback — skips password validation */
   async loginWithGoogle(user: UserDocument) {
+    if (!user.isActive) throw new UnauthorizedException('Contul este dezactivat');
+    return this.buildTokenPair(user);
+  }
+
+  /**
+   * Generează un cod single-use pentru flow-ul Google OAuth. Codul ajunge în
+   * URL-ul de redirect (vs JWT-ul însuși) și e schimbat pe tokens via
+   * POST /auth/google/exchange. TTL scurt + ștergere atomic la consum.
+   */
+  async createGoogleAuthCode(userId: string | Types.ObjectId): Promise<string> {
+    const code = crypto.randomBytes(32).toString('hex');
+    await this.authCodeModel.create({
+      code,
+      userId: new Types.ObjectId(userId),
+      expiresAt: new Date(Date.now() + AUTH_CODE_TTL_MS),
+    });
+    return code;
+  }
+
+  /**
+   * Consumă codul Google OAuth: findOneAndDelete atomic (single-use), verifică
+   * expirarea, încarcă userul și emite tokens. Aruncă UnauthorizedException
+   * dacă codul lipsește, e expirat sau userul nu mai e activ.
+   */
+  async exchangeGoogleAuthCode(code: string) {
+    if (!code || typeof code !== 'string') {
+      throw new UnauthorizedException('Cod de autentificare invalid');
+    }
+    const record = await this.authCodeModel.findOneAndDelete({ code }).exec();
+    if (!record) {
+      throw new UnauthorizedException('Cod de autentificare invalid sau deja folosit');
+    }
+    if (record.expiresAt.getTime() < Date.now()) {
+      throw new UnauthorizedException('Cod de autentificare expirat');
+    }
+    const user = await this.usersService.findById(record.userId.toString());
     if (!user.isActive) throw new UnauthorizedException('Contul este dezactivat');
     return this.buildTokenPair(user);
   }
