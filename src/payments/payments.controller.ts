@@ -50,6 +50,15 @@ export class PaymentsController {
     const webhookSecret = this.config.get<string>('STRIPE_WEBHOOK_SECRET');
     let event: Stripe.Event;
 
+    // Fail closed dacă secretul nu e configurat. Cu secret gol Stripe.constructEvent
+    // calculează HMAC cu cheie vidă, ceea ce un atacator poate replica trivial →
+    // webhook spoofing și enrollment gratuit. Nu aruncăm la boot ca să nu spargem
+    // mediile de dev fără Stripe configurat — eșuăm doar pe request.
+    if (!webhookSecret) {
+      this.logger.error('STRIPE_WEBHOOK_SECRET nu este configurat — webhook respins');
+      return res.status(503).send('Webhook indisponibil — configurare lipsă');
+    }
+
     const rawBody: Buffer | undefined = req.rawBody;
     if (!rawBody) {
       this.logger.error('rawBody is not available — webhook signature verification will fail');
@@ -57,7 +66,7 @@ export class PaymentsController {
     }
 
     try {
-      event = this.stripe.webhooks.constructEvent(rawBody, sig, webhookSecret ?? '');
+      event = this.stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
     } catch (err: any) {
       this.logger.error(`Webhook signature error: ${err.message}`);
       return res.status(400).send(`Webhook Error: ${err.message}`);
