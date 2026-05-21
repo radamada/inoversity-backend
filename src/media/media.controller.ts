@@ -16,6 +16,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
+import { openSync, readSync, closeSync } from 'fs';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { MediaService } from './media.service';
@@ -24,6 +25,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
+import { detectFileType } from '../common/utils/file-magic';
 
 @ApiTags('Media')
 @ApiBearerAuth()
@@ -49,8 +51,17 @@ export class MediaController {
     @Body('title') title: string,
   ) {
     if (!file) throw new BadRequestException('Niciun fișier primit');
-    const allowedVideoMimes = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm', 'video/x-matroska'];
-    if (!allowedVideoMimes.includes(file.mimetype)) {
+    // Validare prin magic bytes (file.mimetype e controlat de client). Fișierul
+    // e pe disc (diskStorage) — citim doar primii 16 bytes ca să detectăm
+    // signature-ul, fără să încărcăm tot în memorie.
+    const head = Buffer.alloc(16);
+    const fd = openSync(file.path, 'r');
+    try { readSync(fd, head, 0, 16, 0); } finally { closeSync(fd); }
+    const detected = detectFileType(head);
+    // 'video/webm' din util acoperă și matroska (același container EBML), deci
+    // include și 'video/x-matroska' pentru fișiere .mkv.
+    const allowedVideoMimes = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm'];
+    if (!detected || !allowedVideoMimes.includes(detected)) {
       throw new BadRequestException('Tip de fișier invalid. Sunt acceptate: MP4, MOV, AVI, WebM, MKV');
     }
     return this.mediaService.uploadVideo(file, title);
@@ -64,11 +75,13 @@ export class MediaController {
   @ApiOperation({ summary: 'Upload thumbnail imagine la Bunny.net Storage' })
   async uploadImage(@UploadedFile() file: Express.Multer.File) {
     if (!file) throw new BadRequestException('Niciun fișier primit');
+    const detected = detectFileType(file.buffer);
     const allowedImageMimes = ['image/jpeg', 'image/png', 'image/webp'];
-    if (!allowedImageMimes.includes(file.mimetype)) {
+    if (!detected || !allowedImageMimes.includes(detected)) {
       throw new BadRequestException('Tip de fișier invalid. Sunt acceptate: JPEG, PNG, WebP');
     }
-    const url = await this.mediaService.uploadImage(file.buffer, file.originalname, file.mimetype);
+    // Folosim mime-type-ul detectat din conținut, nu pe cel trimis de client.
+    const url = await this.mediaService.uploadImage(file.buffer, file.originalname, detected);
     return { url };
   }
 
