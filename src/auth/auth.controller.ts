@@ -139,6 +139,7 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @Throttle({ default: { ttl: 60000, limit: 20 } })
   @HttpCode(HttpStatus.OK)
   @UseGuards(AuthGuard('jwt-refresh'))
   @ApiOperation({ summary: 'Reînnoire access token' })
