@@ -948,6 +948,7 @@ export class CoursesService {
 
   async updateQuiz(
     quizId: string,
+    courseId: string,
     data: Partial<{ title: string; order: number; questions: { question: string; options: string[]; correctIndexes: number[] }[] }>,
   ): Promise<LessonDocument> {
     // Validate correctIndexes are within options bounds for each question
@@ -963,8 +964,11 @@ export class CoursesService {
       }
     }
 
-    const quiz = await this.lessonModel.findByIdAndUpdate(
-      quizId,
+    // Filtru pe courseId, nu doar pe _id: altfel un instructor care deține
+    // courseId-ul X putea edita un quiz aparținând altui curs (IDOR), pentru că
+    // assertCourseOwner verifică doar cursul, nu și apartenența quiz-ului la el.
+    const quiz = await this.lessonModel.findOneAndUpdate(
+      { _id: quizId, courseId: new Types.ObjectId(courseId), type: 'quiz' },
       { $set: data },
       { new: true },
     );

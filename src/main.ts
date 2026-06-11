@@ -14,9 +14,16 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 /** Attach a short unique ID to every request for log correlation.
  *  Honours a client-supplied X-Request-ID header (e.g. from a reverse proxy). */
 let _reqCounter = 0;
+// Acceptă X-Request-ID de la client doar dacă e „cuminte" (token scurt,
+// alfanumeric). Altfel generăm unul nou. Header-ul ajunge atât în log-uri cât
+// și în răspuns, deci o valoare necontrolată permite log-forging (câmpuri
+// false) și log-flooding (valori uriașe).
+const REQUEST_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 function requestIdMiddleware(req: Request, res: Response, next: NextFunction) {
   const incoming = req.headers['x-request-id'] as string | undefined;
-  const id = incoming ?? `r${(++_reqCounter).toString(36)}`;
+  const id = incoming && REQUEST_ID_RE.test(incoming)
+    ? incoming
+    : `r${(++_reqCounter).toString(36)}`;
   req.headers['x-request-id'] = id;
   res.setHeader('X-Request-ID', id);
   next();

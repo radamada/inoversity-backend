@@ -439,6 +439,6 @@ export class AdminController {
     @Param('quizId', ParseObjectIdPipe) quizId: string,
     @Body() dto: UpdateQuizDto,
   ) {
-    return this.coursesService.updateQuiz(quizId, dto);
+    return this.coursesService.updateQuiz(quizId, courseId, dto);
   }
 }

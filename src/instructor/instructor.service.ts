@@ -310,7 +310,7 @@ export class InstructorService {
     isAdmin = false,
   ) {
     await this.assertCourseOwner(courseId, instructorId, isAdmin);
-    return this.coursesService.updateQuiz(quizId, dto);
+    return this.coursesService.updateQuiz(quizId, courseId, dto);
   }
 
   // ── Publish ───────────────────────────────────────────────────────────────

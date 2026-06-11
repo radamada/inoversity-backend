@@ -2,9 +2,12 @@ import { PipeTransform, Injectable, BadRequestException } from '@nestjs/common';
 import { Types } from 'mongoose';
 
 @Injectable()
-export class ParseObjectIdPipe implements PipeTransform<string, string> {
-  transform(value: string): string {
-    if (!Types.ObjectId.isValid(value)) {
+export class ParseObjectIdPipe implements PipeTransform<unknown, string> {
+  transform(value: unknown): string {
+    // typeof check: pe @Param valorile sunt mereu string, dar dacă pipe-ul ajunge
+    // vreodată pe @Query/@Body, un obiect ca `{$ne:null}` ar putea trece de
+    // isValid. Respingem orice non-string din start (paritate cu varianta Optional).
+    if (typeof value !== 'string' || !Types.ObjectId.isValid(value)) {
       throw new BadRequestException('ID invalid');
     }
     return value;

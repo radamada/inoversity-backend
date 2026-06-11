@@ -230,29 +230,25 @@ export class CouponsService {
       }
     }
 
-    if (coupon.minOrderAmount > 0 && orderTotal < coupon.minOrderAmount) {
+    // Baza pe care se aplică reducerea, în funcție de scope: cursul vizat,
+    // subtotalul instructorului, sau tot coșul. minOrderAmount trebuie verificat
+    // pe ACEEAȘI bază — altfel pragul se satisface umplând coșul cu cursuri
+    // nelegate, deși reducerea cade pe subtotalul scope-uit (mult mai mic).
+    const scopedBase = coupon.courseId
+      ? (coursePrices[coupon.courseId.toString()] ?? 0)
+      : coupon.instructorId
+        ? (instructorSubtotals[coupon.instructorId.toString()] ?? orderTotal)
+        : orderTotal;
+
+    if (coupon.minOrderAmount > 0 && scopedBase < coupon.minOrderAmount) {
       await this.couponModel.updateOne({ code: normalizedCode }, { $inc: { usedCount: -1 } });
       throw new BadRequestException(
         `Suma minimă pentru acest cod este ${coupon.minOrderAmount.toFixed(2)} lei`,
       );
     }
 
-    // Course-scoped: reduce doar prețul cursului respectiv
-    if (coupon.courseId) {
-      const coursePrice = coursePrices[coupon.courseId.toString()] ?? 0;
-      return {
-        discountAmount: this.calculateDiscount(coupon.discountType, coupon.discountValue, coursePrice),
-        usedAt: userId ? now : null,
-      };
-    }
-
-    // Instructor-scoped: reduce doar subtotalul instructorului
-    const relevantTotal = coupon.instructorId
-      ? (instructorSubtotals[coupon.instructorId.toString()] ?? orderTotal)
-      : orderTotal;
-
     return {
-      discountAmount: this.calculateDiscount(coupon.discountType, coupon.discountValue, relevantTotal),
+      discountAmount: this.calculateDiscount(coupon.discountType, coupon.discountValue, scopedBase),
       usedAt: userId ? now : null,
     };
   }
