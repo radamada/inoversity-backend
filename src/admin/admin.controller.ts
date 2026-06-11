@@ -40,6 +40,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ParseObjectIdPipe, ParseOptionalObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 import { CreateCourseDto } from '../courses/dto/create-course.dto';
+import { UpdateCourseDto } from '../courses/dto/update-course.dto';
 import { SaveCurriculumDto } from '../courses/dto/save-curriculum.dto';
 
 class SetRoleDto {
@@ -335,7 +336,7 @@ export class AdminController {
   }
 
   @Patch('courses/:id')
-  updateCourse(@Param('id', ParseObjectIdPipe) id: string, @Body() dto: Partial<CreateCourseDto>, @CurrentUser() user: any) {
+  updateCourse(@Param('id', ParseObjectIdPipe) id: string, @Body() dto: UpdateCourseDto, @CurrentUser() user: any) {
     return this.coursesService.update(id, dto, user._id.toString(), true);
   }
 

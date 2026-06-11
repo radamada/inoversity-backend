@@ -15,6 +15,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { CoursesService } from './courses.service';
 import { CreateCourseDto } from './dto/create-course.dto';
+import { UpdateCourseDto } from './dto/update-course.dto';
 import { CourseQueryDto } from './dto/course-query.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -99,7 +100,7 @@ export class CoursesController {
   @ApiBearerAuth()
   update(
     @Param('id', ParseObjectIdPipe) id: string,
-    @Body() dto: Partial<CreateCourseDto>,
+    @Body() dto: UpdateCourseDto,
     @CurrentUser() user: any,
   ) {
     return this.coursesService.update(id, dto, user._id.toString(), user.role === 'admin');

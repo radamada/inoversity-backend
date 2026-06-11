@@ -17,6 +17,7 @@ import { Review, ReviewDocument } from '../reviews/schemas/review.schema';
 import { Cart, CartDocument } from '../cart/schemas/cart.schema';
 import { Order, OrderDocument } from '../orders/schemas/order.schema';
 import { CreateCourseDto } from './dto/create-course.dto';
+import { UpdateCourseDto } from './dto/update-course.dto';
 import { CourseQueryDto } from './dto/course-query.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MediaService } from '../media/media.service';
@@ -201,7 +202,7 @@ export class CoursesService {
     }
   }
 
-  async update(id: string, dto: Partial<CreateCourseDto>, userId: string, isAdmin = false): Promise<CourseDocument> {
+  async update(id: string, dto: UpdateCourseDto, userId: string, isAdmin = false): Promise<CourseDocument> {
     const existing = await this.courseModel.findById(id).select('instructorId published').lean();
     if (!existing) throw new NotFoundException('Cursul nu a fost găsit');
 
@@ -212,6 +213,13 @@ export class CoursesService {
     const changes: Record<string, any> = { ...dto };
     if (changes.categoryId) changes.categoryId = new Types.ObjectId(changes.categoryId);
     else delete changes.categoryId;
+
+    // Reasignarea instructorului e exclusiv override de admin; un instructor nu
+    // are voie să-și schimbe propriul curs pe alt user (sau să fure ownership).
+    if (changes.instructorId) {
+      if (isAdmin) changes.instructorId = new Types.ObjectId(changes.instructorId);
+      else delete changes.instructorId;
+    }
 
     // If the course is published, merge changes into pendingChanges (preserve existing curriculum draft)
     if (existing.published) {

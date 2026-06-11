@@ -24,6 +24,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CoursesService } from '../courses/courses.service';
 import { CreateCourseDto } from '../courses/dto/create-course.dto';
+import { UpdateCourseDto } from '../courses/dto/update-course.dto';
 import { SaveCurriculumDto } from '../courses/dto/save-curriculum.dto';
 import { CouponsService, CreateCouponDto } from '../coupons/coupons.service';
 // Value import (not `import type`) — see note in coupons.controller.ts. Without
@@ -215,7 +216,7 @@ export class InstructorController {
   @ApiOperation({ summary: 'Actualizare curs' })
   updateCourse(
     @Param('id', ParseObjectIdPipe) id: string,
-    @Body() dto: Partial<CreateCourseDto>,
+    @Body() dto: UpdateCourseDto,
     @CurrentUser() user: any,
   ) {
     return this.coursesService.update(id, dto, user._id.toString(), false);
