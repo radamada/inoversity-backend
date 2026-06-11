@@ -356,6 +356,10 @@ export class OrdersService {
     const [orders, total, availableStatuses] = await Promise.all([
       this.orderModel
         .find(query)
+        // stripeClientSecret poate confirma client-side un PaymentIntent — n-are
+        // use-case admin și nu trebuie să ajungă în UI. stripePaymentIntentId
+        // rămâne (reconciliere cu dashboard-ul Stripe / refund).
+        .select('-stripeClientSecret')
         .populate('userId', 'name email')
         .sort({ createdAt: -1 })
         .skip(skip)

@@ -142,9 +142,48 @@ export class CouponsService {
     const now = new Date();
     const userObjId = userId ? new Types.ObjectId(userId) : null;
 
-    // Atomic guard: filter enforces maxUses AND maxUsesPerUser in the same single-doc
-    // update, so concurrent requests cannot all pass a post-hoc check. Without the
-    // per-user limit in the filter, parallel requests would each succeed → over-use.
+    // ── Faza 1: validări request-local ÎNAINTE de claim-ul atomic ──────────────
+    // Scope (curs/instructor) și minOrderAmount depind de coșul cererii, nu de
+    // starea concurentă a cuponului. Le verificăm pe o citire read-only, înainte
+    // de a incrementa usedCount — astfel dispar decrementele compensatorii
+    // (rollback non-atomic: un crash între increment și decrement umfla
+    // permanent usedCount).
+    const pre = await this.couponModel
+      .findOne({ code: normalizedCode, isActive: true, deletedAt: null })
+      .lean();
+    if (!pre || (pre.expiresAt && pre.expiresAt.getTime() <= now.getTime())) {
+      throw new BadRequestException('Codul de reducere nu este valid sau a expirat');
+    }
+
+    // Course-scoped: cursul vizat trebuie să fie în coș
+    if (pre.courseId && !(pre.courseId.toString() in coursePrices)) {
+      throw new BadRequestException(
+        'Codul de reducere nu este valabil pentru cursurile din coșul tău',
+      );
+    }
+    // Instructor-scoped: cel puțin un curs al instructorului în coș
+    if (!pre.courseId && pre.instructorId && !instructorIds.includes(pre.instructorId.toString())) {
+      throw new BadRequestException(
+        'Codul de reducere nu este valabil pentru cursurile din coșul tău',
+      );
+    }
+
+    // Baza pe care se aplică reducerea (scope) + minOrderAmount pe ACEEAȘI bază —
+    // altfel pragul s-ar satisface umplând coșul cu cursuri nelegate.
+    const scopedBase = pre.courseId
+      ? (coursePrices[pre.courseId.toString()] ?? 0)
+      : pre.instructorId
+        ? (instructorSubtotals[pre.instructorId.toString()] ?? orderTotal)
+        : orderTotal;
+    if (pre.minOrderAmount > 0 && scopedBase < pre.minOrderAmount) {
+      throw new BadRequestException(
+        `Suma minimă pentru acest cod este ${pre.minOrderAmount.toFixed(2)} lei`,
+      );
+    }
+
+    // ── Faza 2: claim atomic ──────────────────────────────────────────────────
+    // Filtrul impune maxUses ȘI maxUsesPerUser în același update single-doc, deci
+    // cereri concurente nu pot trece toate un check post-hoc.
     const filter: Record<string, any> = {
       code: normalizedCode,
       isActive: true,
@@ -178,18 +217,23 @@ export class CouponsService {
       });
     }
 
+    // Push în `usages` DOAR când există limită per-user — altfel array-ul ar
+    // crește nemărginit (la 1000+ folosiri se atinge limita BSON de 16MB).
+    // usedCount tot se incrementează, deci limita globală rămâne corectă.
+    const trackUsage = !!userObjId && pre.maxUsesPerUser !== null && pre.maxUsesPerUser !== undefined;
+
     const coupon = await this.couponModel.findOneAndUpdate(
       filter,
       {
         $inc: { usedCount: 1 },
-        ...(userObjId ? { $push: { usages: { userId: userObjId, usedAt: now } } } : {}),
+        ...(trackUsage ? { $push: { usages: { userId: userObjId, usedAt: now } } } : {}),
       },
       { new: true },
     ).lean();
 
     if (!coupon) {
-      // Filter failed: either coupon invalid/expired, global cap hit, or per-user cap hit.
-      // Distinguish per-user cap with a follow-up read so the message is accurate.
+      // Filter failed: global cap hit, per-user cap hit, sau cuponul s-a
+      // dezactivat/expirat între faza 1 și 2 (race rar).
       if (userObjId) {
         const existing = await this.couponModel.findOne({ code: normalizedCode }).lean();
         if (
@@ -206,45 +250,6 @@ export class CouponsService {
         }
       }
       throw new BadRequestException('Codul de reducere nu este valid sau a expirat');
-    }
-
-    // Course-scoped coupon: must have that specific course in cart
-    if (coupon.courseId) {
-      const courseIdStr = coupon.courseId.toString();
-      if (!(courseIdStr in coursePrices)) {
-        await this.couponModel.updateOne({ code: normalizedCode }, { $inc: { usedCount: -1 } });
-        throw new BadRequestException(
-          'Codul de reducere nu este valabil pentru cursurile din coșul tău',
-        );
-      }
-    }
-
-    // Instructor-scoped coupon: must have at least one course by that instructor
-    if (!coupon.courseId && coupon.instructorId) {
-      const instructorIdStr = coupon.instructorId.toString();
-      if (!instructorIds.includes(instructorIdStr)) {
-        await this.couponModel.updateOne({ code: normalizedCode }, { $inc: { usedCount: -1 } });
-        throw new BadRequestException(
-          'Codul de reducere nu este valabil pentru cursurile din coșul tău',
-        );
-      }
-    }
-
-    // Baza pe care se aplică reducerea, în funcție de scope: cursul vizat,
-    // subtotalul instructorului, sau tot coșul. minOrderAmount trebuie verificat
-    // pe ACEEAȘI bază — altfel pragul se satisface umplând coșul cu cursuri
-    // nelegate, deși reducerea cade pe subtotalul scope-uit (mult mai mic).
-    const scopedBase = coupon.courseId
-      ? (coursePrices[coupon.courseId.toString()] ?? 0)
-      : coupon.instructorId
-        ? (instructorSubtotals[coupon.instructorId.toString()] ?? orderTotal)
-        : orderTotal;
-
-    if (coupon.minOrderAmount > 0 && scopedBase < coupon.minOrderAmount) {
-      await this.couponModel.updateOne({ code: normalizedCode }, { $inc: { usedCount: -1 } });
-      throw new BadRequestException(
-        `Suma minimă pentru acest cod este ${coupon.minOrderAmount.toFixed(2)} lei`,
-      );
     }
 
     return {
