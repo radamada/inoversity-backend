@@ -86,5 +86,12 @@ export class User {
 
 export const UserSchema = SchemaFactory.createForClass(User);
 UserSchema.index({ passwordResetToken: 1 }, { sparse: true });
-UserSchema.index({ googleId: 1 }, { sparse: true, unique: true });
+// `default: null` scrie googleId:null explicit pe conturile email+parolă, iar un
+// index `sparse` tot indexează valorile null prezente → al doilea cont fără Google
+// se ciocnea de unique (E11000). partialFilterExpression indexează DOAR string-urile
+// reale, deci unicitatea se aplică între Google ID-uri, nu între null-uri.
+UserSchema.index(
+  { googleId: 1 },
+  { unique: true, partialFilterExpression: { googleId: { $type: 'string' } } },
+);
 UserSchema.index({ emailChangeToken: 1 }, { sparse: true });
