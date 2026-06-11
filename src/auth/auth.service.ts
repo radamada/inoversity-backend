@@ -31,9 +31,24 @@ export class AuthService {
     @InjectModel(AuthCode.name)
     private authCodeModel: Model<AuthCodeDocument>,
   ) {
-    if (!config.get('JWT_ACCESS_SECRET') || !config.get('JWT_REFRESH_SECRET')) {
+    const accessSecret = config.get<string>('JWT_ACCESS_SECRET');
+    const refreshSecret = config.get<string>('JWT_REFRESH_SECRET');
+    if (!accessSecret || !refreshSecret) {
       throw new InternalServerErrorException(
         'JWT_ACCESS_SECRET și JWT_REFRESH_SECRET sunt obligatorii în variabilele de mediu',
+      );
+    }
+    // Secrete prea scurte => forjare offline a JWT-urilor. Secrete identice =>
+    // un access token de 15m devine refresh valid de 7z (granița access/refresh
+    // se bazează exclusiv pe faptul că secretele diferă).
+    if (accessSecret.length < 32 || refreshSecret.length < 32) {
+      throw new InternalServerErrorException(
+        'JWT_ACCESS_SECRET și JWT_REFRESH_SECRET trebuie să aibă minim 32 de caractere',
+      );
+    }
+    if (accessSecret === refreshSecret) {
+      throw new InternalServerErrorException(
+        'JWT_ACCESS_SECRET și JWT_REFRESH_SECRET trebuie să fie diferite',
       );
     }
   }
@@ -152,11 +167,13 @@ export class AuthService {
     const accessToken = this.jwtService.sign(payload, {
       secret: this.config.get('JWT_ACCESS_SECRET'),
       expiresIn: this.config.get('JWT_ACCESS_EXPIRES_IN', '15m'),
+      algorithm: 'HS256',
     });
 
     const refreshToken = this.jwtService.sign(payload, {
       secret: this.config.get('JWT_REFRESH_SECRET'),
       expiresIn: this.config.get('JWT_REFRESH_EXPIRES_IN', '7d'),
+      algorithm: 'HS256',
     });
 
     return { accessToken, refreshToken, user };

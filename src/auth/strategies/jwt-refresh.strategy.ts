@@ -18,6 +18,7 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
       ]),
       ignoreExpiration: false,
       secretOrKey: config.get<string>('JWT_REFRESH_SECRET') ?? (() => { throw new Error('JWT_REFRESH_SECRET env var is not set'); })(),
+      algorithms: ['HS256'],
       passReqToCallback: true,
     } as any);
   }
