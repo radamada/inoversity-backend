@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { CouponsService, CreateCouponDto } from './coupons.service';
+import { CouponsService, CreateCouponDto, UpdateCouponDto } from './coupons.service';
 // NOTE: CreateCouponDto must be a VALUE import (not `import type`) so NestJS
 // can read its class-validator metadata at runtime. Type-only imports get
 // stripped by tsc, leaving ValidationPipe with no schema → it rejects every
@@ -66,7 +66,7 @@ export class CouponsController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
-  update(@Param('id', ParseObjectIdPipe) id: string, @Body() dto: Partial<CreateCouponDto>) {
+  update(@Param('id', ParseObjectIdPipe) id: string, @Body() dto: UpdateCouponDto) {
     return this.couponsService.update(id, dto);
   }
 

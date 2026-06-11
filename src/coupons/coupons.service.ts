@@ -8,6 +8,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { IsEnum, IsOptional, IsBoolean, IsNumber, IsString, Min, Max, IsDate } from 'class-validator';
+import { PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { Coupon, CouponDocument } from './schemas/coupon.schema';
 import type { DiscountType } from './schemas/coupon.schema';
@@ -70,6 +71,12 @@ export class CreateCouponDto {
   @IsString()
   courseId?: string | null;
 }
+
+// Tip real pentru update (nu `Partial<CreateCouponDto>`, care s-ar șterge în
+// Object la runtime și ar dezactiva ValidationPipe). Service-ul tot strip-uiește
+// câmpurile server-controlled (code/usedCount/usages/instructorId) ca apărare în
+// adâncime, dar DTO-ul real respinge orice câmp necunoscut din start.
+export class UpdateCouponDto extends PartialType(CreateCouponDto) {}
 
 @Injectable()
 export class CouponsService {

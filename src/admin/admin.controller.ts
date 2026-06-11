@@ -29,7 +29,7 @@ import {
   ValidateNested,
   IsInt,
 } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { AdminService } from './admin.service';
 import { CoursesService } from '../courses/courses.service';
@@ -103,6 +103,10 @@ class CreateLessonDto {
   @IsOptional()
   isFree?: boolean;
 }
+
+// Tip real (nu `Partial<CreateLessonDto>`, care s-ar șterge în Object și ar
+// dezactiva ValidationPipe) — astfel câmpurile din afara DTO sunt respinse.
+class UpdateLessonDto extends PartialType(CreateLessonDto) {}
 
 class QuizQuestionDto {
   @IsString()
@@ -408,7 +412,7 @@ export class AdminController {
   }
 
   @Patch('lessons/:id')
-  updateLesson(@Param('id', ParseObjectIdPipe) id: string, @Body() dto: Partial<CreateLessonDto>) {
+  updateLesson(@Param('id', ParseObjectIdPipe) id: string, @Body() dto: UpdateLessonDto) {
     return this.coursesService.updateLesson(id, dto);
   }
 

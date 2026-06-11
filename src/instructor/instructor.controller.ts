@@ -16,7 +16,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { IsString, IsOptional, IsBoolean, IsNumber, Min, Max, MinLength, IsArray, ArrayMaxSize, ArrayMinSize, ValidateNested, IsInt } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { InstructorService } from './instructor.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -26,7 +26,7 @@ import { CoursesService } from '../courses/courses.service';
 import { CreateCourseDto } from '../courses/dto/create-course.dto';
 import { UpdateCourseDto } from '../courses/dto/update-course.dto';
 import { SaveCurriculumDto } from '../courses/dto/save-curriculum.dto';
-import { CouponsService, CreateCouponDto } from '../coupons/coupons.service';
+import { CouponsService, CreateCouponDto, UpdateCouponDto } from '../coupons/coupons.service';
 // Value import (not `import type`) — see note in coupons.controller.ts. Without
 // this, ValidationPipe has no DTO metadata and rejects all body properties.
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
@@ -116,6 +116,9 @@ class CreateLessonDto {
   @IsOptional()
   isFree?: boolean;
 }
+
+// Tip real (nu `Partial<CreateLessonDto>`) ca să rămână activ ValidationPipe.
+class UpdateLessonDto extends PartialType(CreateLessonDto) {}
 
 class QuizQuestionDto {
   @IsString()
@@ -310,7 +313,7 @@ export class InstructorController {
   @Patch('lessons/:id')
   updateLesson(
     @Param('id', ParseObjectIdPipe) id: string,
-    @Body() dto: Partial<CreateLessonDto>,
+    @Body() dto: UpdateLessonDto,
     @CurrentUser() user: any,
   ) {
     return this.instructorService.updateLesson(id, dto, user._id.toString(), false);
@@ -378,7 +381,7 @@ export class InstructorController {
   @ApiOperation({ summary: 'Actualizează cupon propriu' })
   async updateCoupon(
     @Param('id', ParseObjectIdPipe) id: string,
-    @Body() dto: Partial<CreateCouponDto>,
+    @Body() dto: UpdateCouponDto,
     @CurrentUser() user: any,
   ) {
     // Validate course ownership on update too
