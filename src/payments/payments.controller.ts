@@ -90,7 +90,10 @@ export class PaymentsController {
     if (event.type === 'payment_intent.succeeded') {
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
       try {
-        const enrolled = await this.ordersService.confirmPayment(paymentIntent.id);
+        const enrolled = await this.ordersService.confirmPayment(
+          paymentIntent.id,
+          paymentIntent.amount_received,
+        );
         if (enrolled) {
           this.logger.log(`Payment confirmed and enrolled: ${paymentIntent.id}`);
         }

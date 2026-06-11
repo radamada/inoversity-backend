@@ -245,7 +245,7 @@ export class OrdersService {
    *
    * Returns true if the order was newly confirmed, false if already processed.
    */
-  async confirmPayment(paymentIntentId: string): Promise<boolean> {
+  async confirmPayment(paymentIntentId: string, amountReceived?: number | null): Promise<boolean> {
     // Phase 1: Atomic claim — transition pending → confirming.
     // Only one instance/request can succeed this update at a time.
     const order = await this.orderModel.findOneAndUpdate(
@@ -254,6 +254,21 @@ export class OrdersService {
       { new: true },
     );
     if (!order) return false; // already confirmed or not found
+
+    // Defense-in-depth: nu acorda acces dacă suma încasată e mai mică decât
+    // totalul comenzii. În fluxul normal coincid (amount-ul PI e setat
+    // server-side la create), dar un PI ajuns `succeeded` cu underpayment nu
+    // trebuie să dea înscriere. Fail-closed: lasă comanda în `confirming`
+    // pentru review manual, fără enroll. Event-ul Stripe e deja marcat procesat,
+    // deci nu se reîncearcă la nesfârșit.
+    const expectedAmount = Math.round(order.total * 100);
+    if (amountReceived != null && amountReceived < expectedAmount) {
+      this.logger.error(
+        `Underpayment pe order ${order._id}: încasat ${amountReceived} bani, ` +
+          `așteptat ${expectedAmount} bani (PI ${paymentIntentId}). NU se acordă acces — review manual.`,
+      );
+      return false;
+    }
 
     try {
       // Phase 2: Enroll user in each purchased course
