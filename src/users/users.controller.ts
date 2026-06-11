@@ -11,6 +11,7 @@ import { MailService } from '../mail/mail.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ChangeEmailDto } from './dto/change-email.dto';
+import { ConfirmEmailTokenDto } from './dto/confirm-email-token.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
@@ -74,23 +75,21 @@ export class UsersController {
   // declanșarea accidentală de prefetchers, link previews, web crawlers, <img>
   // tags sau alte mecanisme care emit GET-uri automate. FE-ul are pagini
   // dedicate (/email-change/confirm-{old,new}) care fac POST-ul din useEffect.
+  @Throttle({ default: { ttl: 3_600_000, limit: 10 } })
   @Post('email/confirm-old')
   @ApiOperation({ summary: 'Confirmă adresa veche de email (pasul 1)' })
-  async confirmOldEmail(@Body() body: { token?: string }) {
-    const token = body?.token;
-    if (!token) throw new BadRequestException('Token lipsă');
-    const { pendingEmail, token: sameToken } = await this.usersService.confirmOldEmailChange(token);
+  async confirmOldEmail(@Body() dto: ConfirmEmailTokenDto) {
+    const { pendingEmail, token: sameToken } = await this.usersService.confirmOldEmailChange(dto.token);
     // Trimite email la noua adresă — fire-and-forget
     this.mailService.sendEmailChangeNewConfirmation(pendingEmail, sameToken).catch(() => {});
     return { message: 'Adresa curentă a fost confirmată. Verifică inbox-ul noii adrese de email.' };
   }
 
+  @Throttle({ default: { ttl: 3_600_000, limit: 10 } })
   @Post('email/confirm-new')
   @ApiOperation({ summary: 'Confirmă noua adresă de email (pasul 2)' })
-  async confirmNewEmail(@Body() body: { token?: string }) {
-    const token = body?.token;
-    if (!token) throw new BadRequestException('Token lipsă');
-    const { message, oldEmail } = await this.usersService.confirmNewEmailChange(token);
+  async confirmNewEmail(@Body() dto: ConfirmEmailTokenDto) {
+    const { message, oldEmail } = await this.usersService.confirmNewEmailChange(dto.token);
     // Notificăm adresa veche că schimbarea a fost finalizată
     this.mailService.sendEmailChangedNotification(oldEmail).catch(() => {});
     return { message };
