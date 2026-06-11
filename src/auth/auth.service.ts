@@ -123,7 +123,11 @@ export class AuthService {
     if (record.expiresAt.getTime() < Date.now()) {
       throw new UnauthorizedException('Cod de autentificare expirat');
     }
-    const user = await this.usersService.findById(record.userId.toString());
+    // findByIdForAuth (nu findById) ca să avem tokenVersion real în token —
+    // altfel un cont al cărui tokenVersion a fost incrementat (logout sau
+    // linking de cont neverificat) ar primi un token cu tokenVersion 0, imediat
+    // invalid.
+    const user = await this.usersService.findByIdForAuth(record.userId.toString());
     if (!user.isActive) throw new UnauthorizedException('Contul este dezactivat');
     return this.buildTokenPair(user);
   }

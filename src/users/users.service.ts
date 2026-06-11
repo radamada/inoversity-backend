@@ -119,14 +119,37 @@ export class UsersService {
     const byGoogleId = await this.userModel.findOne({ googleId: dto.googleId }).exec();
     if (byGoogleId) return byGoogleId;
 
-    // 2. Existing email+password account → link Google to it
+    // 2. Existing email account → link Google to it.
     const byEmail = await this.userModel
       .findOne({ email: dto.email.toLowerCase() })
       .exec();
     if (byEmail) {
-      byEmail.googleId = dto.googleId;
-      if (!byEmail.avatar && dto.avatar) byEmail.avatar = dto.avatar;
-      return byEmail.save();
+      const set: Record<string, any> = { googleId: dto.googleId };
+      if (!byEmail.avatar && dto.avatar) set.avatar = dto.avatar;
+
+      // Account-linking takeover: înregistrarea cu parolă NU cere verificare de
+      // email, deci un atacator putea „squat-ui" emailul victimei cu o parolă
+      // proprie (emailVerified=false). Când victima reală se loga cu Google,
+      // identitatea ei Google se atașa peste contul atacatorului, care păstra
+      // accesul prin parolă. Google tocmai a dovedit proprietatea emailului,
+      // deci dacă acontul NU era verificat tratăm parola existentă ca neîncrezută:
+      // o anulăm și incrementăm tokenVersion (taie sesiunile unui eventual
+      // squatter). Conturile deja verificate își păstrează parola.
+      const inc: Record<string, number> = {};
+      if (!byEmail.emailVerified) {
+        set.emailVerified = true;
+        set.passwordHash = null;
+        inc.tokenVersion = 1;
+      }
+
+      const update: Record<string, any> = { $set: set };
+      if (inc.tokenVersion) update.$inc = inc;
+
+      const linked = await this.userModel
+        .findByIdAndUpdate(byEmail._id, update, { new: true })
+        .select('+tokenVersion')
+        .exec();
+      return linked!;
     }
 
     // 3. Brand-new user via Google
