@@ -157,10 +157,16 @@ export class UsersService {
       { new: false }, // return original doc to verify token was found
     );
     if (!user) throw new NotFoundException('Token invalid sau expirat');
-    // Hash and save new password separately (token already consumed above)
+    // Hash and save new password separately (token already consumed above).
+    // $inc tokenVersion: reset-ul de parolă e acțiunea „am fost compromis",
+    // deci invalidează toate sesiunile existente (access + refresh), la fel ca
+    // logout/email-change. Fără asta, un token furat supraviețuia reset-ului.
     await this.userModel.updateOne(
       { _id: user._id },
-      { $set: { passwordHash: await bcrypt.hash(newPassword, 12) } },
+      {
+        $set: { passwordHash: await bcrypt.hash(newPassword, 12) },
+        $inc: { tokenVersion: 1 },
+      },
     );
   }
 
