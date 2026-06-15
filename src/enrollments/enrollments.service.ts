@@ -199,6 +199,7 @@ export class EnrollmentsService {
         populate: { path: 'instructorId', select: 'name avatar' },
       })
       .sort({ createdAt: -1 })
+      .lean() // endpoint read-only, serializat direct în JSON — fără hidratare
       .exec();
   }
 

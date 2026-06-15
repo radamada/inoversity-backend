@@ -135,9 +135,12 @@ export class OrdersService {
 
       // Enroll user — if any enrollment fails, mark order failed and propagate
       try {
-        for (const item of order.items) {
-          await this.enrollmentsService.enroll(userId, item.courseId.toString(), order._id.toString());
-        }
+        // Cursuri distincte => înscrieri independente, le rulăm în paralel.
+        await Promise.all(
+          order.items.map((item) =>
+            this.enrollmentsService.enroll(userId, item.courseId.toString(), order._id.toString()),
+          ),
+        );
         await this.orderModel.updateOne({ _id: order._id }, { $set: { status: 'paid' } });
       } catch (err: any) {
         await this.orderModel.updateOne({ _id: order._id }, { $set: { status: 'pending' } });
@@ -271,14 +274,16 @@ export class OrdersService {
     }
 
     try {
-      // Phase 2: Enroll user in each purchased course
-      for (const item of order.items) {
-        await this.enrollmentsService.enroll(
-          order.userId.toString(),
-          item.courseId.toString(),
-          order._id.toString(),
-        );
-      }
+      // Phase 2: Enroll user in each purchased course (cursuri distincte => paralel)
+      await Promise.all(
+        order.items.map((item) =>
+          this.enrollmentsService.enroll(
+            order.userId.toString(),
+            item.courseId.toString(),
+            order._id.toString(),
+          ),
+        ),
+      );
 
       // Phase 3: All enrollments succeeded — mark as paid
       await this.orderModel.updateOne(
@@ -499,13 +504,12 @@ export class OrdersService {
     });
     await order.save();
 
-    for (const item of order.items) {
-      await this.enrollmentsService.enroll(
-        userId,
-        item.courseId.toString(),
-        order._id.toString(),
-      );
-    }
+    // Cursuri distincte => înscrieri independente, în paralel.
+    await Promise.all(
+      order.items.map((item) =>
+        this.enrollmentsService.enroll(userId, item.courseId.toString(), order._id.toString()),
+      ),
+    );
 
     // Purchase notification
     const courseNames = order.items.map((i) => `"${i.title}"`).join(', ');

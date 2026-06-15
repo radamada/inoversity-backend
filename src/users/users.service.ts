@@ -80,7 +80,16 @@ export class UsersService {
    * Returns the userul with tokenVersion explicitly selected.
    */
   async findByIdForAuth(id: string): Promise<UserDocument> {
-    const user = await this.userModel.findById(id).select('+tokenVersion').exec();
+    // .lean(): rulează pe FIECARE request autentificat (strategiile jwt/refresh);
+    // req.user e folosit doar pentru citiri (nu se apelează metode Mongoose pe el),
+    // deci sărim peste hidratarea documentului. NU cache-uim: role/isActive/
+    // tokenVersion se schimbă la logout/reset/block/demotare și un cache TTL ar
+    // crea o fereastră de staleness pe authz.
+    const user = await this.userModel
+      .findById(id)
+      .select('+tokenVersion')
+      .lean<UserDocument>()
+      .exec();
     if (!user) throw new NotFoundException('Utilizatorul nu a fost găsit');
     return user;
   }
