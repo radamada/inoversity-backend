@@ -14,6 +14,7 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
+import { UsersService } from '../users/users.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -33,7 +34,10 @@ import {
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly usersService: UsersService,
+  ) {}
 
   @Post('register')
   @Throttle({ default: { ttl: 60000, limit: 3 } })
@@ -173,8 +177,11 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Date utilizator curent' })
-  me(@CurrentUser() user: any) {
-    return this.sanitizeUser(user);
+  async me(@CurrentUser() user: any) {
+    // Re-încarcă cu passwordHash ca sanitizeUser să poată deriva `hasPassword`
+    // (userul din JWT strategy nu-l are selectat).
+    const fresh = await this.usersService.findByIdWithPassword(user._id);
+    return this.sanitizeUser(fresh);
   }
 
   @Post('forgot-password')
@@ -223,6 +230,9 @@ export class AuthController {
 
   private sanitizeUser(user: any) {
     const u = user?.toObject ? user.toObject() : { ...user };
+    // `hasPassword`: conturile Google-only n-au parolă; FE-ul ascunde câmpul de
+    // confirmare a parolei la schimbarea de email pe baza acestui flag.
+    u.hasPassword = !!u.passwordHash;
     delete u.passwordHash;
     delete u.passwordResetToken;
     delete u.passwordResetExpires;

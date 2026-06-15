@@ -66,6 +66,14 @@ export class UsersService {
     return user;
   }
 
+  /** Ca findById, dar încarcă passwordHash — pentru a deriva `hasPassword` în
+   *  /auth/me (conturile Google n-au parolă, deci FE-ul ascunde câmpul de parolă). */
+  async findByIdWithPassword(id: string): Promise<UserDocument> {
+    const user = await this.userModel.findById(id).select('+passwordHash').exec();
+    if (!user) throw new NotFoundException('Utilizatorul nu a fost găsit');
+    return user;
+  }
+
   /**
    * Variant for the auth strategies (jwt + jwt-refresh) which need to compare
    * the incoming JWT's tokenVersion against the user's current tokenVersion.
