@@ -108,6 +108,13 @@ class CreateLessonDto {
 // dezactiva ValidationPipe) — astfel câmpurile din afara DTO sunt respinse.
 class UpdateLessonDto extends PartialType(CreateLessonDto) {}
 
+class SetRevenueShareDto {
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  percent: number;
+}
+
 class QuizQuestionDto {
   @IsString()
   @MinLength(3, { message: 'Întrebarea trebuie să aibă cel puțin 3 caractere' })
@@ -270,9 +277,9 @@ export class AdminController {
   @Patch('users/:id/revenue-share')
   setRevenueShare(
     @Param('id', ParseObjectIdPipe) id: string,
-    @Body() dto: { percent: number },
+    @Body() dto: SetRevenueShareDto,
   ) {
-    return this.adminService.setRevenueShare(id, dto.percent ?? 0);
+    return this.adminService.setRevenueShare(id, dto.percent);
   }
 
   @Patch('users/:id/active')
