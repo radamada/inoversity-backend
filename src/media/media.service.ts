@@ -93,28 +93,6 @@ export class MediaService {
   }
 
   /**
-   * @deprecated Use uploadVideo() instead — this exposes the upload URL client-side.
-   * Kept for reference only.
-   */
-  async getUploadUrl(title: string): Promise<{ videoId: string; uploadUrl: string }> {
-    const response = await axios.post(
-      `${this.baseUrl}/library/${this.libraryId}/videos`,
-      { title },
-      {
-        headers: {
-          AccessKey: this.apiKey,
-          'Content-Type': 'application/json',
-        },
-      },
-    );
-
-    return {
-      videoId: response.data.guid,
-      uploadUrl: `${this.baseUrl}/library/${this.libraryId}/videos/${response.data.guid}`,
-    };
-  }
-
-  /**
    * Generate a signed CDN playback URL for a video.
    * Validates:
    * 1. User is enrolled in the given courseId

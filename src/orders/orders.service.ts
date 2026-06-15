@@ -578,14 +578,6 @@ export class OrdersService {
   /**
    * Rulează la fiecare 5 minute.
    *
-   * Resetează la 'pending' ordinele blocate în 'confirming' de peste 5 minute.
-   * Scenariul: serverul a căzut exact între setarea statusului 'confirming' și
-   * finalizarea înrolărilor. Webhook-ul Stripe va retrimite și va putea
-   * procesa din nou ordinul (care e din nou în 'pending').
-   */
-  /**
-   * Rulează la fiecare 5 minute.
-   *
    * Resetează ordinele blocate în 'confirming' de peste 10 minute înapoi la
    * 'pending' — normalul este câteva secunde; 10 minute acoperă orice spike de
    * latență al bazei de date sau al serviciului de email fără a fi prea agresiv.
